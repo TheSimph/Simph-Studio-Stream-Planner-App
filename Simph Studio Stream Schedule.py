@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 import json, datetime, time, os, textwrap, re, requests, asyncio, pytz, webbrowser, shutil, calendar, math, random
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk
 from tkinter import filedialog, messagebox, colorchooser
 from twitchAPI.twitch import Twitch
 from twitchAPI.helper import first
@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.26"
+        self.APP_VERSION = "0.1.27"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -397,12 +397,15 @@ class SimphStudio(ctk.CTk):
             return res
         except: return [time_str]
 
+    # --- THE "STUCK" RESIZE FIX ---
     def on_preview_resize(self, event):
-        if self._resize_timer:
-            self.after_cancel(self._resize_timer)
-        self.prev_width = event.width
-        self.prev_height = event.height
-        self._resize_timer = self.after(200, self.schedule_preview)
+        # We explicitly verify the event is coming from the container, NOT the image label inside it
+        if event.widget == self.prev_container:
+            if self._resize_timer:
+                self.after_cancel(self._resize_timer)
+            self.prev_width = event.width
+            self.prev_height = event.height
+            self._resize_timer = self.after(200, self.schedule_preview)
 
     def wrap_text_pil(self, text, font, max_width):
         if not text: return []
@@ -702,7 +705,6 @@ class SimphStudio(ctk.CTk):
         threading.Thread(target=self.run_export, daemon=True).start()
 
     def run_export(self):
-        # --- CUSTOM EXPORT FOLDER LOGIC ---
         base_dir = getattr(self, 'export_path_var', tk.StringVar()).get().strip()
         if not base_dir or not os.path.isdir(base_dir):
             base_dir = os.path.join(os.path.expanduser('~'), 'Desktop', 'Simph_Schedules')
@@ -726,6 +728,9 @@ class SimphStudio(ctk.CTk):
             self.log(f"✅ Successfully exported {saved_count} image(s)!")
         else:
             self.log("⚠️ No formats ticked for export!")
+            
+        # Force a UI refresh after export finishes to prevent resizing lockups
+        self.after(100, self.schedule_preview)
 
     def start_deploy(self): threading.Thread(target=lambda: asyncio.run(self.run_engine()), daemon=True).start()
     async def run_engine(self):
@@ -733,10 +738,20 @@ class SimphStudio(ctk.CTk):
         self.generate_preview_image()
         time.sleep(1.5)
 
+        # --- THE WEBHOOK SCRUBBER & DELETION FIX ---
         webhook_url = self.cfg.get('webhook', '').strip()
-        if webhook_url and self.cfg.get("last_msg_id", ""):
-            try: requests.delete(f"{webhook_url}/messages/{self.cfg['last_msg_id']}", timeout=10)
-            except: pass
+        base_webhook = webhook_url.split('?')[0].rstrip('/') 
+        
+        last_msg = self.cfg.get("last_msg_id", "")
+        if base_webhook and last_msg:
+            try: 
+                del_req = requests.delete(f"{base_webhook}/messages/{last_msg}", timeout=10)
+                if del_req.status_code == 204:
+                    self.log("🗑️ Discord: Old schedule successfully deleted.")
+                else:
+                    self.log(f"⚠️ Discord: Old schedule not found or couldn't be deleted (Code {del_req.status_code}).")
+            except Exception as e: 
+                self.log(f"⚠️ Discord: Delete request failed: {e}")
 
         discord_msg = self.get_discord_header() + "\n\n"
         base_dt = self.selected_start_date
@@ -765,14 +780,18 @@ class SimphStudio(ctk.CTk):
         
         if not has_ticked_days: discord_msg += "No streams scheduled for this week!"
 
-        if webhook_url:
+        if base_webhook:
             try:
                 with open("schedule_final.jpg", "rb") as f:
-                    r = requests.post(webhook_url + "?wait=true", data={"content": discord_msg}, files={"file": f}, timeout=15)
+                    r = requests.post(f"{base_webhook}?wait=true", data={"content": discord_msg}, files={"file": f}, timeout=15)
                     if r.status_code in [200, 204]:
-                        self.cfg["last_msg_id"] = r.json().get("id", "")
-                        with open(self.settings_path, "w") as jf: json.dump(self.cfg, jf, indent=4)
+                        try:
+                            self.cfg["last_msg_id"] = r.json().get("id", "")
+                            with open(self.settings_path, "w") as jf: json.dump(self.cfg, jf, indent=4)
+                        except: pass
                         self.log("🏁 Discord: Successfully Uploaded.")
+                    else:
+                        self.log(f"❌ Discord: Upload failed with status code {r.status_code}.")
             except Exception as e: self.log(f"❌ Discord: Webhook Error: {e}")
 
         if self.cfg.get('t_tok'):
