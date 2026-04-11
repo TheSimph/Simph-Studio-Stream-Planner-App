@@ -12,13 +12,13 @@ class SimphStudio(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # --- UPDATE SETTINGS (LOCKED TO VERSION 0.1.5) ---
-        self.APP_VERSION = "0.1.5"
+        # --- UPDATE SETTINGS ---
+        self.APP_VERSION = "0.1.6"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
 
-        self.title(f"Simph Stream Schedule App - Ver {self.APP_VERSION}")
+        self.title(f"Simph Studio - Ver {self.APP_VERSION}")
         self.geometry("1650x1000")
         ctk.set_appearance_mode("dark")
         
@@ -48,15 +48,21 @@ class SimphStudio(ctk.CTk):
             "Twitch Info Panel (Wide)": (1200, 400)
         }
 
-        # --- EXPANDED FONTS ---
+        # --- MASSIVE FONT DICTIONARY ---
         self.font_map = {
-            "Arial Black": "ariblk.ttf", "Impact": "impact.ttf", "Segoe UI Bold": "segoeuib.ttf",
-            "Tahoma Bold": "tahomabd.ttf", "Trebuchet MS": "trebucbd.ttf", "Courier New": "courbd.ttf",
-            "Comic Sans MS": "comicbd.ttf", "Georgia Bold": "georgiab.ttf", "Calibri Bold": "calibrib.ttf",
-            "Times New Roman Bold": "timesbd.ttf", "Lucida Console": "lucon.ttf", "Verdana Bold": "verdanab.ttf",
-            "Consolas": "consola.ttf", "Franklin Gothic": "framd.ttf", "Palatino Linotype": "pala.ttf",
-            "Candara Bold": "candarab.ttf", "Corbel Bold": "corbelb.ttf", "Constantia Bold": "constanb.ttf",
-            "Century Gothic": "gothicb.ttf", "Bookman Old Style": "bookosb.ttf"
+            "Arial": "arial.ttf", "Arial Black": "ariblk.ttf", "Bahnschrift": "bahnschrift.ttf",
+            "Bookman Old Style": "bookosb.ttf", "Calibri": "calibri.ttf", "Calibri Bold": "calibrib.ttf",
+            "Cambria": "cambria.ttf", "Candara": "candara.ttf", "Candara Bold": "candarab.ttf",
+            "Century Gothic": "gothicb.ttf", "Comic Sans MS": "comic.ttf", "Comic Sans MS Bold": "comicbd.ttf",
+            "Consolas": "consola.ttf", "Constantia Bold": "constanb.ttf", "Corbel Bold": "corbelb.ttf",
+            "Courier New": "cour.ttf", "Courier New Bold": "courbd.ttf", "Franklin Gothic": "framd.ttf",
+            "Garamond": "gara.ttf", "Garamond Bold": "garabd.ttf", "Georgia": "georgia.ttf",
+            "Georgia Bold": "georgiab.ttf", "Impact": "impact.ttf", "Lucida Console": "lucon.ttf",
+            "Palatino Linotype": "pala.ttf", "Segoe Script": "segoesc.ttf", "Segoe UI": "segoeui.ttf",
+            "Segoe UI Bold": "segoeuib.ttf", "Tahoma": "tahoma.ttf", "Tahoma Bold": "tahomabd.ttf",
+            "Times New Roman": "times.ttf", "Times New Roman Bold": "timesbd.ttf",
+            "Trebuchet MS": "trebuc.ttf", "Trebuchet MS Bold": "trebucbd.ttf",
+            "Verdana": "verdana.ttf", "Verdana Bold": "verdanab.ttf"
         }
         
         # --- TIMEZONE DICTIONARIES ---
@@ -118,7 +124,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- UPDATED: AUTO-UPDATER WITH CACHE BUSTER ---
+    # --- AUTO-UPDATER ---
     def check_for_updates(self):
         def run_check():
             try:
@@ -134,6 +140,27 @@ class SimphStudio(ctk.CTk):
     def show_update_popup(self, new_v):
         msg = f"A new version of Simph Studio (Ver {new_v}) is available!\n\nWould you like to download it now?"
         if messagebox.askyesno("Update Available", msg): webbrowser.open(self.RELEASE_URL)
+
+    # --- HELP POPUPS ---
+    def show_help_popup(self):
+        msg = (
+            "Welcome to the Streamer Schedule Planner!\n\n"
+            "► LINK TWITCH: Go to 'App Settings' to link Twitch. This unlocks the game search dropdown and dynamic box art.\n"
+            "► TICK DAYS: Use the checkboxes on the left to activate days you plan to stream.\n"
+            "► OFFLINE MODE: Tick 'Offline' next to a day to completely grey it out on the schedule.\n"
+            "► CUSTOM ART: Click the [🖼️] button next to any day to upload your own custom image instead of Twitch box art.\n"
+            "► DEPLOY: Hitting deploy sends the image to Discord (via Webhook) and updates your actual Twitch schedule automatically!"
+        )
+        messagebox.showinfo("Simph Studio User Guide", msg)
+
+    def check_first_run(self):
+        if not self.cfg.get("t_id") or not self.cfg.get("t_tok"):
+            msg = (
+                "Welcome to Simph Studio!\n\n"
+                "It looks like you haven't linked your Twitch Account yet.\n\n"
+                "To unlock official game searches and automatic box art on your schedule, please read the 📘 SYSTEM SETUP GUIDE in the 'APP SETTINGS' tab to get started!"
+            )
+            messagebox.showinfo("First Time Setup", msg)
 
     def apply_right_click(self, widget):
         menu = tk.Menu(self, tearoff=0, bg="#2b2b2b", fg="white", activeborderwidth=0)
@@ -278,14 +305,15 @@ class SimphStudio(ctk.CTk):
                 img.paste(logo, (cw//2 - (logo.width//2), header_y), logo)
                 header_y += l_s + 20 
             
+            # --- TITLE WRAPPING FIX: Adjusted width divisor to wrap tight fonts ---
             h_text, h_size = self.header_entry.get().upper(), int(self.header_size_slider.get())
-            for line in textwrap.wrap(h_text, width=max(10, int((cw*0.9) / (h_size * 0.6)))):
+            for line in textwrap.wrap(h_text, width=max(8, int((cw*0.85) / (h_size * 0.7)))):
                 draw.text((cw//2, header_y), line, fill=c_head, font=self.get_f_path(h_size), anchor="mt")
                 header_y += h_size + 15
                 
             s_text, s_size = self.header_sub_entry.get().upper(), int(self.header_sub_size_slider.get())
             header_y += 10
-            for line in textwrap.wrap(s_text, width=max(15, int((cw*0.9) / (s_size * 0.5)))):
+            for line in textwrap.wrap(s_text, width=max(12, int((cw*0.85) / (s_size * 0.55)))):
                 draw.text((cw//2, header_y), line, fill=c_sub, font=self.get_f_path(s_size), anchor="mt")
                 header_y += s_size + 15
 
@@ -497,7 +525,7 @@ class SimphStudio(ctk.CTk):
             except Exception as e: self.log(f"❌ Discord: Webhook Error: {e}")
 
         if self.cfg.get('t_tok'):
-            self.log("🛰️ Syncing Twitch...")
+            self.log("🛰️ Syncing Twitch Dashboard...")
             try:
                 api = await Twitch(self.cfg['t_id'], self.cfg['t_sec'])
                 api.auto_refresh_auth = False 
@@ -605,6 +633,8 @@ class SimphStudio(ctk.CTk):
         ctk.CTkLabel(side, text="Secondary Display Timezone:").pack(pady=(5,0))
         self.sec_zone = ctk.CTkOptionMenu(side, values=list(self.sec_tz_map.keys()), command=self.schedule_preview); self.sec_zone.pack(fill="x", padx=10, pady=2); self.sec_zone.set(self.cfg.get("sec_zone", "US East (EST/EDT)"))
         
+        # --- NEW DEDICATED HELP BUTTON ---
+        ctk.CTkButton(side, text="📘 HOW TO USE THIS APP", fg_color="#333333", command=self.show_help_popup).pack(fill="x", padx=10, pady=(15, 0))
         ctk.CTkButton(side, text="🚀 DEPLOY", height=60, fg_color="#801010", font=("Arial", 20, "bold"), command=self.start_deploy).pack(side="bottom", pady=20, fill="x", padx=10)
         
         # --- PLANNER RIGHT SIDE ---
@@ -739,10 +769,6 @@ class SimphStudio(ctk.CTk):
         font_file = self.font_map.get(font_name, "arialbd.ttf")
         p = os.path.join(os.environ['WINDIR'], 'Fonts', font_file)
         return ImageFont.truetype(p if os.path.exists(p) else "arialbd.ttf", size)
-
-    def check_first_run(self):
-        if not self.cfg.get("t_id") or not self.cfg.get("t_tok"):
-            messagebox.showinfo("Welcome!", "Please link your Twitch Account in APP SETTINGS before deploying.")
 
 if __name__ == "__main__":
     app = SimphStudio(); app.mainloop()
