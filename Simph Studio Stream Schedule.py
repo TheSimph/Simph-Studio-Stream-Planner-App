@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.16"
+        self.APP_VERSION = "0.1.17"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -145,7 +145,6 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- TRUE AUTO-UPDATER LOGIC WITH TOXIC ENVIRONMENT SCRUBBER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -210,7 +209,7 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Nuke-and-Pave Ghost Script...")
+                self.log("🚀 Preparing Ironclad Ghost Script...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
@@ -224,8 +223,6 @@ class SimphStudio(ctk.CTk):
                 
                 bat_path = os.path.join(self.appdata_dir, "update.bat")
                 
-                # --- THE ENVIRONMENT NUKE ---
-                # We aggressively strip the PATH down to pure Windows system 32 defaults
                 bat_content = f"""@echo off
 echo Installing new Simph Studio Update...
 echo Please wait for the old application to close completely.
@@ -236,7 +233,6 @@ set _MEIPASS2=
 set _MEIPASS=
 set TCL_LIBRARY=
 set TK_LIBRARY=
-set PATH=%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
 del "{zip_path}"
@@ -244,7 +240,20 @@ del "%~f0"
 """
                 with open(bat_path, "w") as f: f.write(bat_content)
                 
-                subprocess.Popen(['cmd.exe', '/c', bat_path], creationflags=subprocess.CREATE_NO_WINDOW)
+                # --- TOXIC ENVIRONMENT SCRUBBER (IRONCLAD) ---
+                clean_env = os.environ.copy()
+                keys_to_scrub = ['_MEIPASS2', '_MEIPASS', 'MEIPASS2', 'TCL_LIBRARY', 'TK_LIBRARY']
+                for k in keys_to_scrub:
+                    clean_env.pop(k, None)
+                
+                # Rip the old _MEI path completely out of the PATH variable
+                if 'PATH' in clean_env and hasattr(sys, '_MEIPASS'):
+                    paths = clean_env['PATH'].split(os.pathsep)
+                    paths = [p for p in paths if sys._MEIPASS not in p]
+                    clean_env['PATH'] = os.pathsep.join(paths)
+                
+                # Launch the script completely detached from the old environment (CREATE_NO_WINDOW = 0x08000000)
+                subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=0x08000000)
                 self.after(0, self.destroy)
             else:
                 self.log("⚠️ Cannot auto-install while running as a .py script. Update downloaded to AppData.")
@@ -254,7 +263,6 @@ del "%~f0"
             self.log(f"❌ Auto-Update failed: {e}")
             self.after(0, self.update_window.destroy)
 
-    # --- HELP POPUPS ---
     def show_help_popup(self):
         msg = (
             "Welcome to the Streamer Schedule Planner!\n\n"
