@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.23"
+        self.APP_VERSION = "0.1.24"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -26,6 +26,14 @@ class SimphStudio(ctk.CTk):
         self.geometry("1650x1000")
         ctk.set_appearance_mode("dark")
         
+        # --- BACKGROUND CLEANUP (Deletes the .old file after an update) ---
+        try:
+            if getattr(sys, 'frozen', False):
+                old_exe = sys.executable + ".old"
+                if os.path.exists(old_exe):
+                    os.remove(old_exe)
+        except: pass
+
         # --- TASKBAR & WINDOW ICON FIX ---
         try:
             import ctypes
@@ -55,7 +63,6 @@ class SimphStudio(ctk.CTk):
         self._resize_timer = None
         self.selected_start_date = datetime.date.today()
         
-        # --- CLEANED CANVAS RATIOS ---
         self.ratios = {
             "9:16 (TikTok/Reels/Shorts)": (1080, 1920),
             "16:9 (Desktop/YouTube)": (1920, 1080),
@@ -144,7 +151,6 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- BULLETPROOF CASE-INSENSITIVE AUTO-UPDATER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -167,6 +173,7 @@ class SimphStudio(ctk.CTk):
         if messagebox.askyesno("Update Available", msg):
             self.perform_update()
 
+    # --- THE RENAME & REINSTALL ENGINE ---
     def perform_update(self):
         self.update_window = ctk.CTkToplevel(self)
         self.update_window.title("Updating...")
@@ -209,12 +216,11 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Bulletproof PID Hunter...")
+                self.log("🚀 Running Clean Reinstaller...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
                 new_exe_path = os.path.join(extract_dir, exe_name)
-                my_pid = os.getpid()
                 
                 if not os.path.exists(new_exe_path):
                     for root, dirs, files in os.walk(extract_dir):
@@ -224,17 +230,15 @@ class SimphStudio(ctk.CTk):
                 
                 bat_path = os.path.join(self.appdata_dir, "update.bat")
                 
+                # The Rename Method: We don't overwrite. We rename the locked file, drop the new one, and launch.
                 bat_content = f"""@echo off
-echo Installing new Simph Studio Update...
-echo Waiting for the old application to fully close.
-:loop
-tasklist /FI "PID eq {my_pid}" 2>NUL | find /I "{my_pid}" >NUL
-if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak > NUL
-    goto loop
-)
+echo Installing Simph Studio Update...
+echo Reinstalling application files...
+timeout /t 3 /nobreak > NUL
+taskkill /F /IM "{exe_name}" 2>NUL
 timeout /t 1 /nobreak > NUL
-move /Y "{new_exe_path}" "{current_exe}"
+ren "{current_exe}" "{exe_name}.old"
+copy /Y "{new_exe_path}" "{current_exe}"
 cd /d "{exe_dir}"
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
@@ -243,23 +247,22 @@ del "%~f0"
 """
                 with open(bat_path, "w") as f: f.write(bat_content)
                 
-                # --- CASE-INSENSITIVE ENVIRONMENT NUKE ---
-                clean_env = os.environ.copy()
-                keys_to_scrub = []
-                for k in clean_env.keys():
-                    k_up = k.upper()
-                    if 'MEIPASS' in k_up or 'TCL_' in k_up or 'TK_' in k_up or '_MEI' in k_up:
-                        keys_to_scrub.append(k)
-                    elif k_up == 'PATH':
-                        if hasattr(sys, '_MEIPASS'):
-                            paths = clean_env[k].split(os.pathsep)
-                            paths = [p for p in paths if sys._MEIPASS not in p]
-                            clean_env[k] = os.pathsep.join(paths)
-                            
-                for k in keys_to_scrub:
-                    clean_env.pop(k, None)
+                # The Environment Sterilizer - Rebuilding a 100% safe environment dict from scratch
+                safe_env = {
+                    "SystemRoot": os.environ.get("SystemRoot", "C:\\Windows"),
+                    "SystemDrive": os.environ.get("SystemDrive", "C:"),
+                    "PATH": os.environ.get("SystemRoot", "C:\\Windows") + "\\System32;" + os.environ.get("SystemRoot", "C:\\Windows"),
+                    "TEMP": os.environ.get("TEMP", "C:\\Temp"),
+                    "TMP": os.environ.get("TMP", "C:\\Temp"),
+                    "USERNAME": os.environ.get("USERNAME", "User"),
+                    "USERPROFILE": os.environ.get("USERPROFILE", "C:\\Users\\User"),
+                    "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", "C:\\Users\\User\\AppData\\Local"),
+                    "APPDATA": os.environ.get("APPDATA", "C:\\Users\\User\\AppData\\Roaming"),
+                    "HOMEDRIVE": os.environ.get("HOMEDRIVE", "C:"),
+                    "HOMEPATH": os.environ.get("HOMEPATH", "\\Users\\User")
+                }
                 
-                subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=0x08000000)
+                subprocess.Popen(['cmd.exe', '/c', bat_path], env=safe_env, creationflags=0x08000000)
                 self.after(0, self.destroy)
             else:
                 self.log("⚠️ Cannot auto-install while running as a .py script. Update downloaded to AppData.")
@@ -532,10 +535,8 @@ del "%~f0"
             day_f_size = min(65, int(box_h * 0.30))
             day_f = self.get_f_path(day_f_size)
             
-            # --- THE TIMEZONE SQUISH FIX (RE-IMPLEMENTED) ---
             max_day_w = max([day_f.getlength(item["code"]) for item in checked])
             
-            # Dynamically shrink Time font so it NEVER exceeds the Day font width
             time_f_size = min(30, int(box_h * 0.15))
             time_f = self.get_f_path(time_f_size)
             
@@ -553,7 +554,7 @@ del "%~f0"
                 time_f_size -= 1
                 time_f = self.get_f_path(time_f_size)
                 
-            left_col_w = max_day_w # The left column is tightly locked to the Day text width
+            left_col_w = max_day_w 
             
             for idx, item in enumerate(checked):
                 c, r = positions[idx]
@@ -605,7 +606,6 @@ del "%~f0"
                         img.paste(art, (art_x, y + 20), mask)
                     except: pass
                 
-                # --- VERTICAL SAFE ZONE CLAMP ---
                 max_text_w = max(20, art_x - text_x - 20)
                 game_f = self.get_f_path(local_g_size)
                 sub_f = self.get_f_path(local_s_size)
