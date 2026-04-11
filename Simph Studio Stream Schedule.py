@@ -7,16 +7,20 @@ from twitchAPI.twitch import Twitch
 from twitchAPI.helper import first
 from twitchAPI.type import AuthScope
 import threading
+import sys
+import zipfile
+import subprocess
 
 class SimphStudio(ctk.CTk):
     def __init__(self):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.6"
+        self.APP_VERSION = "0.1.7"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
+        self.API_LATEST_URL = f"https://api.github.com/repos/TheSimph/{self.REPO_NAME}/releases/latest"
 
         self.title(f"Simph Studio - Ver {self.APP_VERSION}")
         self.geometry("1650x1000")
@@ -124,8 +128,9 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- AUTO-UPDATER ---
+    # --- TRUE AUTO-UPDATER LOGIC ---
     def check_for_updates(self):
+        self.log("🔍 Checking GitHub for updates...")
         def run_check():
             try:
                 cb = f"?cb={random.randint(1, 999999)}"
@@ -133,13 +138,94 @@ class SimphStudio(ctk.CTk):
                 if response.status_code == 200:
                     latest_v = response.text.strip()
                     if latest_v != self.APP_VERSION:
+                        self.log(f"💡 Update found! (Ver {latest_v})")
                         self.after(0, lambda: self.show_update_popup(latest_v))
-            except: pass 
+                    else:
+                        self.log("✅ App is up to date.")
+            except Exception as e: 
+                self.log(f"❌ Update check failed: {e}")
         threading.Thread(target=run_check, daemon=True).start()
 
     def show_update_popup(self, new_v):
-        msg = f"A new version of Simph Studio (Ver {new_v}) is available!\n\nWould you like to download it now?"
-        if messagebox.askyesno("Update Available", msg): webbrowser.open(self.RELEASE_URL)
+        msg = f"A new version of Simph Studio (Ver {new_v}) is available!\n\nWould you like to download and install it now? (The app will restart)."
+        if messagebox.askyesno("Update Available", msg):
+            self.perform_update()
+
+    def perform_update(self):
+        self.update_window = ctk.CTkToplevel(self)
+        self.update_window.title("Updating...")
+        self.update_window.geometry("350x150")
+        self.update_window.attributes("-topmost", True)
+        
+        ctk.CTkLabel(self.update_window, text="Downloading update, please wait...", font=("Arial", 16)).pack(pady=20)
+        self.progress = ctk.CTkProgressBar(self.update_window, mode="indeterminate")
+        self.progress.pack(pady=10, padx=20, fill="x")
+        self.progress.start()
+        
+        threading.Thread(target=self._download_and_apply_update, daemon=True).start()
+
+    def _download_and_apply_update(self):
+        try:
+            self.log("🛰️ Querying GitHub API for latest release asset...")
+            resp = requests.get(self.API_LATEST_URL).json()
+            download_url = None
+            
+            for asset in resp.get("assets", []):
+                if asset["name"].endswith(".zip"):
+                    download_url = asset["browser_download_url"]
+                    break
+            
+            if not download_url:
+                raise Exception("Could not find a .zip file in the latest GitHub release.")
+
+            self.log(f"📥 Downloading: {download_url}")
+            zip_path = os.path.join(self.appdata_dir, "update.zip")
+            with requests.get(download_url, stream=True) as r:
+                r.raise_for_status()
+                with open(zip_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+            self.log("📦 Extracting new files...")
+            extract_dir = os.path.join(self.appdata_dir, "update_extracted")
+            if os.path.exists(extract_dir): shutil.rmtree(extract_dir)
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            if getattr(sys, 'frozen', False):
+                self.log("🚀 Preparing Ghost Script...")
+                current_exe = sys.executable
+                exe_name = os.path.basename(current_exe)
+                new_exe_path = os.path.join(extract_dir, exe_name)
+                
+                if not os.path.exists(new_exe_path):
+                    # Fallback in case they nested it in a folder inside the zip
+                    for root, dirs, files in os.walk(extract_dir):
+                        if exe_name in files:
+                            new_exe_path = os.path.join(root, exe_name)
+                            break
+                
+                bat_path = os.path.join(self.appdata_dir, "update.bat")
+                bat_content = f"""@echo off
+echo Installing new Simph Studio Update...
+timeout /t 3 /nobreak > NUL
+move /Y "{new_exe_path}" "{current_exe}"
+start "" "{current_exe}"
+rmdir /S /Q "{extract_dir}"
+del "{zip_path}"
+del "%~f0"
+"""
+                with open(bat_path, "w") as f: f.write(bat_content)
+                
+                os.startfile(bat_path)
+                self.after(0, self.destroy)
+            else:
+                self.log("⚠️ Cannot auto-install while running as a .py script. Update downloaded to AppData.")
+                self.after(0, self.update_window.destroy)
+
+        except Exception as e:
+            self.log(f"❌ Auto-Update failed: {e}")
+            self.after(0, self.update_window.destroy)
 
     # --- HELP POPUPS ---
     def show_help_popup(self):
@@ -305,7 +391,7 @@ class SimphStudio(ctk.CTk):
                 img.paste(logo, (cw//2 - (logo.width//2), header_y), logo)
                 header_y += l_s + 20 
             
-            # --- TITLE WRAPPING FIX: Adjusted width divisor to wrap tight fonts ---
+            # --- TITLE WRAPPING FIX ---
             h_text, h_size = self.header_entry.get().upper(), int(self.header_size_slider.get())
             for line in textwrap.wrap(h_text, width=max(8, int((cw*0.85) / (h_size * 0.7)))):
                 draw.text((cw//2, header_y), line, fill=c_head, font=self.get_f_path(h_size), anchor="mt")
@@ -461,7 +547,6 @@ class SimphStudio(ctk.CTk):
                             for line in s_lines:
                                 draw.text((text_x, gy), line, fill=c_sub, font=sub_f); gy += sub_f_size + 8
 
-            # --- DYNAMIC FULL-CONTAINER PREVIEW SCALING ---
             max_preview_w = getattr(self, 'prev_width', 950) - 20
             max_preview_h = getattr(self, 'prev_height', 850) - 20
             if max_preview_w < 100: max_preview_w = 950
