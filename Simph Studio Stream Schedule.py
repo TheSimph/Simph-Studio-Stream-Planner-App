@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.24"
+        self.APP_VERSION = "0.1.26"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -25,15 +25,25 @@ class SimphStudio(ctk.CTk):
         self.title(f"Simph Studio - Ver {self.APP_VERSION}")
         self.geometry("1650x1000")
         ctk.set_appearance_mode("dark")
-        
-        # --- BACKGROUND CLEANUP (Deletes the .old file after an update) ---
-        try:
-            if getattr(sys, 'frozen', False):
-                old_exe = sys.executable + ".old"
-                if os.path.exists(old_exe):
-                    os.remove(old_exe)
-        except: pass
 
+        # --- SILENT BACKGROUND CLEANUP ---
+        def cleanup_old_files():
+            time.sleep(3) 
+            try:
+                if getattr(sys, 'frozen', False):
+                    old_exe = sys.executable + ".old"
+                    if os.path.exists(old_exe):
+                        os.remove(old_exe)
+                if os.path.exists(os.path.join(self.appdata_dir, "update.zip")):
+                    os.remove(os.path.join(self.appdata_dir, "update.zip"))
+                if os.path.exists(os.path.join(self.appdata_dir, "update_extracted")):
+                    shutil.rmtree(os.path.join(self.appdata_dir, "update_extracted"), ignore_errors=True)
+                if os.path.exists(os.path.join(self.appdata_dir, "update.bat")):
+                    os.remove(os.path.join(self.appdata_dir, "update.bat"))
+            except: pass
+        
+        threading.Thread(target=cleanup_old_files, daemon=True).start()
+        
         # --- TASKBAR & WINDOW ICON FIX ---
         try:
             import ctypes
@@ -141,7 +151,7 @@ class SimphStudio(ctk.CTk):
             "font": "Arial Black", "box_color": "#6E1414", "bg_zoom": 100, "box_opacity": 240,
             "header_txt_color": "#FFFFFF", "sub_txt_color": "#C8C8C8", "box_txt_color": "#FFFFFF",
             "header_text": "STREAMER SCHEDULE", "header_size": 100, "sub_size": 40, "logo_size": 200,
-            "game_size": 45, "subtitle_size": 30,
+            "game_size": 45, "subtitle_size": 30, "export_path": "",
             "my_zone": "UK (GMT/BST)", "sec_zone": "US East (EST/EDT)", "start_day": "MON",
             "canvas_format": "9:16 (TikTok/Reels/Shorts)", "max_box_h": 250, "time_fmt": "24-Hour (20:00)", "show_primary": True,
             "sponsor_title": "", "goal_current": "", "goal_target": "", "sponsor_path": ""
@@ -151,6 +161,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
+    # --- PURE PYTHON SEAMLESS REINSTALLER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -173,7 +184,6 @@ class SimphStudio(ctk.CTk):
         if messagebox.askyesno("Update Available", msg):
             self.perform_update()
 
-    # --- THE RENAME & REINSTALL ENGINE ---
     def perform_update(self):
         self.update_window = ctk.CTkToplevel(self)
         self.update_window.title("Updating...")
@@ -216,11 +226,12 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Running Clean Reinstaller...")
+                self.log("🚀 Executing Pure Python Seamless Update...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
                 new_exe_path = os.path.join(extract_dir, exe_name)
+                old_exe = current_exe + ".old"
                 
                 if not os.path.exists(new_exe_path):
                     for root, dirs, files in os.walk(extract_dir):
@@ -228,48 +239,40 @@ class SimphStudio(ctk.CTk):
                             new_exe_path = os.path.join(root, exe_name)
                             break
                 
-                bat_path = os.path.join(self.appdata_dir, "update.bat")
+                if not os.path.exists(new_exe_path):
+                    raise Exception("Could not locate the extracted .exe file.")
                 
-                # The Rename Method: We don't overwrite. We rename the locked file, drop the new one, and launch.
-                bat_content = f"""@echo off
-echo Installing Simph Studio Update...
-echo Reinstalling application files...
-timeout /t 3 /nobreak > NUL
-taskkill /F /IM "{exe_name}" 2>NUL
-timeout /t 1 /nobreak > NUL
-ren "{current_exe}" "{exe_name}.old"
-copy /Y "{new_exe_path}" "{current_exe}"
-cd /d "{exe_dir}"
-start "" "{current_exe}"
-rmdir /S /Q "{extract_dir}"
-del "{zip_path}"
-del "%~f0"
-"""
-                with open(bat_path, "w") as f: f.write(bat_content)
+                if os.path.exists(old_exe):
+                    try: os.remove(old_exe)
+                    except: pass
+                os.rename(current_exe, old_exe)
+                shutil.move(new_exe_path, current_exe)
                 
-                # The Environment Sterilizer - Rebuilding a 100% safe environment dict from scratch
-                safe_env = {
-                    "SystemRoot": os.environ.get("SystemRoot", "C:\\Windows"),
-                    "SystemDrive": os.environ.get("SystemDrive", "C:"),
-                    "PATH": os.environ.get("SystemRoot", "C:\\Windows") + "\\System32;" + os.environ.get("SystemRoot", "C:\\Windows"),
-                    "TEMP": os.environ.get("TEMP", "C:\\Temp"),
-                    "TMP": os.environ.get("TMP", "C:\\Temp"),
-                    "USERNAME": os.environ.get("USERNAME", "User"),
-                    "USERPROFILE": os.environ.get("USERPROFILE", "C:\\Users\\User"),
-                    "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", "C:\\Users\\User\\AppData\\Local"),
-                    "APPDATA": os.environ.get("APPDATA", "C:\\Users\\User\\AppData\\Roaming"),
-                    "HOMEDRIVE": os.environ.get("HOMEDRIVE", "C:"),
-                    "HOMEPATH": os.environ.get("HOMEPATH", "\\Users\\User")
-                }
+                clean_env = os.environ.copy()
+                keys_to_scrub = [k for k in clean_env.keys() if any(x in k.upper() for x in ['MEIPASS', 'TCL_', 'TK_', '_MEI'])]
+                for k in keys_to_scrub:
+                    clean_env.pop(k, None)
+                    
+                if hasattr(sys, '_MEIPASS'):
+                    paths = clean_env.get('PATH', '').split(os.pathsep)
+                    paths = [p for p in paths if sys._MEIPASS not in p]
+                    clean_env['PATH'] = os.pathsep.join(paths)
                 
-                subprocess.Popen(['cmd.exe', '/c', bat_path], env=safe_env, creationflags=0x08000000)
+                subprocess.Popen([current_exe], env=clean_env, cwd=exe_dir, creationflags=0x00000008)
                 self.after(0, self.destroy)
+                os._exit(0)
             else:
                 self.log("⚠️ Cannot auto-install while running as a .py script. Update downloaded to AppData.")
                 self.after(0, self.update_window.destroy)
 
         except Exception as e:
             self.log(f"❌ Auto-Update failed: {e}")
+            if getattr(sys, 'frozen', False):
+                try:
+                    current_exe = sys.executable
+                    if os.path.exists(current_exe + ".old") and not os.path.exists(current_exe):
+                        os.rename(current_exe + ".old", current_exe)
+                except: pass
             self.after(0, self.update_window.destroy)
 
     def show_help_popup(self):
@@ -699,9 +702,14 @@ del "%~f0"
         threading.Thread(target=self.run_export, daemon=True).start()
 
     def run_export(self):
-        self.log("💾 Exporting selected formats to Desktop...")
-        export_dir = os.path.join(os.path.expanduser('~'), 'Desktop', 'Simph_Schedules')
-        os.makedirs(export_dir, exist_ok=True)
+        # --- CUSTOM EXPORT FOLDER LOGIC ---
+        base_dir = getattr(self, 'export_path_var', tk.StringVar()).get().strip()
+        if not base_dir or not os.path.isdir(base_dir):
+            base_dir = os.path.join(os.path.expanduser('~'), 'Desktop', 'Simph_Schedules')
+        
+        os.makedirs(base_dir, exist_ok=True)
+        self.log(f"💾 Exporting selected formats to: {base_dir} ...")
+        
         saved_count = 0
         
         for r_name, var in self.export_vars.items():
@@ -709,13 +717,13 @@ del "%~f0"
                 try:
                     e_img = self.render_schedule_image(r_name)
                     safe_name = r_name.split(' ')[0].replace(':', 'x')
-                    e_path = os.path.join(export_dir, f"Schedule_{self.selected_start_date.strftime('%b%d')}_{safe_name}.jpg")
+                    e_path = os.path.join(base_dir, f"Schedule_{self.selected_start_date.strftime('%b%d')}_{safe_name}.jpg")
                     e_img.convert("RGB").save(e_path, quality=95)
                     saved_count += 1
                 except Exception as e: self.log(f"❌ Failed to export {r_name}: {e}")
         
         if saved_count > 0:
-            self.log(f"✅ Successfully exported {saved_count} image(s) to Desktop/Simph_Schedules!")
+            self.log(f"✅ Successfully exported {saved_count} image(s)!")
         else:
             self.log("⚠️ No formats ticked for export!")
 
@@ -873,9 +881,26 @@ del "%~f0"
         self.goal_target.bind("<KeyRelease>", self.schedule_preview)
         self.goal_target.insert(0, self.cfg.get("goal_target", ""))
 
-        # --- SECTION: EXPORT SIZES ---
+        # --- SECTION: EXPORT OPTIONS & CUSTOM FOLDER ---
         self.add_section_header(side, "--- EXPORT OPTIONS ---")
-        ctk.CTkLabel(side, text="Select formats to save to Desktop:", text_color="#AAAAAA", font=("Arial", 10)).pack(anchor="w", padx=10)
+        
+        path_f = ctk.CTkFrame(side, fg_color="transparent")
+        path_f.pack(fill="x", padx=10, pady=(0, 5))
+        
+        self.export_path_var = tk.StringVar(value=self.cfg.get("export_path", ""))
+        
+        path_entry = ctk.CTkEntry(path_f, textvariable=self.export_path_var, placeholder_text="Custom Export Folder...", state="normal")
+        path_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        def choose_export_dir():
+            d = filedialog.askdirectory()
+            if d:
+                self.export_path_var.set(d)
+                self.cfg["export_path"] = d
+                
+        ctk.CTkButton(path_f, text="📁", width=30, command=choose_export_dir).pack(side="right")
+
+        ctk.CTkLabel(side, text="Select formats to save:", text_color="#AAAAAA", font=("Arial", 10)).pack(anchor="w", padx=10)
         self.export_vars = {}
         for r_name in self.ratios.keys():
             var = ctk.BooleanVar(value=True if "9:16" in r_name else False)
@@ -986,7 +1011,7 @@ del "%~f0"
         self.hide_all_suggest(); self.focus(); threading.Thread(target=lambda: asyncio.run(self.up_art(val, self.days_ui_list[idx]["code"])), daemon=True).start()
     
     def save_settings(self):
-        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get(), "game_size":self.game_size_slider.get(), "subtitle_size":self.sub_size_slider.get()})
+        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get(), "game_size":self.game_size_slider.get(), "subtitle_size":self.sub_size_slider.get(), "export_path": getattr(self, 'export_path_var', tk.StringVar()).get()})
         with open(self.settings_path, "w") as f: json.dump(self.cfg, f, indent=4)
         self.refresh_status(); messagebox.showinfo("Saved", "Settings Saved Securely!"); self.schedule_preview()
 
