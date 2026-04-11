@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.17"
+        self.APP_VERSION = "0.1.22"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -63,7 +63,6 @@ class SimphStudio(ctk.CTk):
             "4:5 (Vertical Post)": (1080, 1350)
         }
 
-        # --- MASSIVE FONT DICTIONARY ---
         self.font_map = {
             "Arial": "arial.ttf", "Arial Black": "ariblk.ttf", "Bahnschrift": "bahnschrift.ttf",
             "Bookman Old Style": "bookosb.ttf", "Calibri": "calibri.ttf", "Calibri Bold": "calibrib.ttf",
@@ -80,7 +79,6 @@ class SimphStudio(ctk.CTk):
             "Verdana": "verdana.ttf", "Verdana Bold": "verdanab.ttf"
         }
         
-        # --- TIMEZONE DICTIONARIES ---
         self.tz_map = {
             "UK (GMT/BST)": "Europe/London", "US East (EST/EDT)": "US/Eastern", "US Central (CST/CDT)": "US/Central",
             "US Mountain (MST/MDT)": "US/Mountain", "US Pacific (PST/PDT)": "US/Pacific", 
@@ -136,6 +134,7 @@ class SimphStudio(ctk.CTk):
             "font": "Arial Black", "box_color": "#6E1414", "bg_zoom": 100, "box_opacity": 240,
             "header_txt_color": "#FFFFFF", "sub_txt_color": "#C8C8C8", "box_txt_color": "#FFFFFF",
             "header_text": "STREAMER SCHEDULE", "header_size": 100, "sub_size": 40, "logo_size": 200,
+            "game_size": 45, "subtitle_size": 30,
             "my_zone": "UK (GMT/BST)", "sec_zone": "US East (EST/EDT)", "start_day": "MON",
             "canvas_format": "9:16 (TikTok/Reels/Shorts)", "max_box_h": 250, "time_fmt": "24-Hour (20:00)", "show_primary": True,
             "sponsor_title": "", "goal_current": "", "goal_target": "", "sponsor_path": ""
@@ -145,6 +144,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
+    # --- TRUE AUTO-UPDATER LOGIC WITH PID HUNTER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -182,7 +182,7 @@ class SimphStudio(ctk.CTk):
 
     def _download_and_apply_update(self):
         try:
-            self.log("🛰️ Querying GitHub API for latest release asset...")
+            self.log("🛰️ Querying GitHub API for latest release...")
             resp = requests.get(self.API_LATEST_URL).json()
             download_url = None
             
@@ -192,7 +192,7 @@ class SimphStudio(ctk.CTk):
                     break
             
             if not download_url:
-                raise Exception("Could not find a .zip file in the latest GitHub release.")
+                raise Exception("Could not find a .zip file in the latest release.")
 
             self.log(f"📥 Downloading: {download_url}")
             zip_path = os.path.join(self.appdata_dir, "update.zip")
@@ -209,11 +209,12 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Ironclad Ghost Script...")
+                self.log("🚀 Preparing PID Hunter Script...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
                 new_exe_path = os.path.join(extract_dir, exe_name)
+                my_pid = os.getpid()
                 
                 if not os.path.exists(new_exe_path):
                     for root, dirs, files in os.walk(extract_dir):
@@ -225,8 +226,14 @@ class SimphStudio(ctk.CTk):
                 
                 bat_content = f"""@echo off
 echo Installing new Simph Studio Update...
-echo Please wait for the old application to close completely.
-timeout /t 5 /nobreak > NUL
+echo Waiting for the old application to fully close.
+:loop
+tasklist /FI "PID eq {my_pid}" 2>NUL | find /I "{my_pid}" >NUL
+if "%ERRORLEVEL%"=="0" (
+    timeout /t 1 /nobreak > NUL
+    goto loop
+)
+timeout /t 1 /nobreak > NUL
 move /Y "{new_exe_path}" "{current_exe}"
 cd /d "{exe_dir}"
 set _MEIPASS2=
@@ -240,19 +247,15 @@ del "%~f0"
 """
                 with open(bat_path, "w") as f: f.write(bat_content)
                 
-                # --- TOXIC ENVIRONMENT SCRUBBER (IRONCLAD) ---
                 clean_env = os.environ.copy()
                 keys_to_scrub = ['_MEIPASS2', '_MEIPASS', 'MEIPASS2', 'TCL_LIBRARY', 'TK_LIBRARY']
                 for k in keys_to_scrub:
                     clean_env.pop(k, None)
-                
-                # Rip the old _MEI path completely out of the PATH variable
                 if 'PATH' in clean_env and hasattr(sys, '_MEIPASS'):
                     paths = clean_env['PATH'].split(os.pathsep)
                     paths = [p for p in paths if sys._MEIPASS not in p]
                     clean_env['PATH'] = os.pathsep.join(paths)
                 
-                # Launch the script completely detached from the old environment (CREATE_NO_WINDOW = 0x08000000)
                 subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=0x08000000)
                 self.after(0, self.destroy)
             else:
@@ -392,6 +395,26 @@ del "%~f0"
         self.prev_height = event.height
         self._resize_timer = self.after(200, self.schedule_preview)
 
+    def wrap_text_pil(self, text, font, max_width):
+        if not text: return []
+        lines = []
+        words = text.split()
+        current_line = ""
+        for word in words:
+            test_line = current_line + word + " " if current_line else word + " "
+            if font.getlength(test_line) <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line.strip())
+                    current_line = word + " "
+                else:
+                    lines.append(word)
+                    current_line = ""
+        if current_line:
+            lines.append(current_line.strip())
+        return lines
+
     def render_schedule_image(self, target_format):
         sp_title = self.sponsor_title.get().strip() if hasattr(self, 'sponsor_title') else ""
         sp_cur_str = self.goal_current.get().strip() if hasattr(self, 'goal_current') else ""
@@ -433,13 +456,15 @@ del "%~f0"
             header_y += l_s + 20 
         
         h_text, h_size = self.header_entry.get().upper(), int(self.header_size_slider.get())
-        for line in textwrap.wrap(h_text, width=max(8, int((cw*0.85) / (h_size * 0.7)))):
+        h_lines = self.wrap_text_pil(h_text, self.get_f_path(h_size), cw * 0.85)
+        for line in h_lines:
             draw.text((cw//2, header_y), line, fill=c_head, font=self.get_f_path(h_size), anchor="mt")
             header_y += h_size + 15
             
         s_text, s_size = self.header_sub_entry.get().upper(), int(self.header_sub_size_slider.get())
         header_y += 10
-        for line in textwrap.wrap(s_text, width=max(12, int((cw*0.85) / (s_size * 0.55)))):
+        s_lines = self.wrap_text_pil(s_text, self.get_f_path(s_size), cw * 0.85)
+        for line in s_lines:
             draw.text((cw//2, header_y), line, fill=c_sub, font=self.get_f_path(s_size), anchor="mt")
             header_y += s_size + 15
 
@@ -498,11 +523,33 @@ del "%~f0"
                 
             img = Image.alpha_composite(img, overlay); draw = ImageDraw.Draw(img) 
 
-            day_f = self.get_f_path(min(65, int(box_h * 0.30))); day_f_size = min(65, int(box_h * 0.30))
-            time_f = self.get_f_path(min(30, int(box_h * 0.15))); time_f_size = min(30, int(box_h * 0.15))
-            game_f = self.get_f_path(min(45, int(box_h * 0.22))); game_f_size = min(45, int(box_h * 0.22))
-            sub_f = self.get_f_path(min(38, int(box_h * 0.18))); sub_f_size = min(38, int(box_h * 0.18))
+            raw_g_size = int(self.game_size_slider.get())
+            raw_s_size = int(self.sub_size_slider.get())
 
+            day_f = self.get_f_path(min(65, int(box_h * 0.30))); day_f_size = min(65, int(box_h * 0.30))
+            
+            # --- THE TIMEZONE SQUISH FIX ---
+            # 1. Set up the dedicated Left Column
+            max_day_w = max([day_f.getlength(item["code"]) for item in checked])
+            left_col_w = int(max(max_day_w, cw * 0.12)) # Guarantees minimum width so fonts don't crush
+            
+            # 2. Dynamically squish the Time Font until it fits inside the Left Column perfectly
+            time_f_size = min(30, int(box_h * 0.15))
+            time_f = self.get_f_path(time_f_size)
+            
+            while time_f_size > 10:
+                max_t_w = 0
+                for item in checked:
+                    if not item['offline'].get():
+                        times = self.get_converted_time(item['time'].get(), self.my_zone.get(), self.sec_zone.get(), self.show_primary.get())
+                        for t_str in times:
+                            w = time_f.getlength(t_str)
+                            if w > max_t_w: max_t_w = w
+                if max_t_w <= left_col_w:
+                    break
+                time_f_size -= 1
+                time_f = self.get_f_path(time_f_size)
+            
             for idx, item in enumerate(checked):
                 c, r = positions[idx]
                 box_x = int(80 + (c * col_w))
@@ -510,10 +557,16 @@ del "%~f0"
                 y = int(start_y + (r * (box_h + spacing)))
                 
                 is_off = item['offline'].get()
+                left_margin = 25
+                
+                local_g_size = max(10, min(raw_g_size, int(box_h * 0.4)))
+                local_s_size = max(10, min(raw_s_size, int(box_h * 0.3)))
                 
                 if is_off:
-                    draw.text((box_x + 40, y + (box_h * 0.5)), item["code"], fill=c_txt, font=day_f, anchor="lm")
-                    draw.text((box_x + 280, y + (box_h * 0.5)), "OFFLINE", fill=c_sub, font=game_f, anchor="lm")
+                    game_f_off = self.get_f_path(local_g_size)
+                    draw.text((box_x + left_margin, y + (box_h * 0.5)), item["code"], fill=c_txt, font=day_f, anchor="lm")
+                    # Offline text now physically aligns with the game titles perfectly
+                    draw.text((box_x + left_margin + left_col_w + 25, y + (box_h * 0.5)), "OFFLINE", fill=c_sub, font=game_f_off, anchor="lm")
                     continue
 
                 raw_g = item["game"].get().strip().upper()
@@ -526,14 +579,18 @@ del "%~f0"
                 elif item["code"] in self.art_cache and raw_g:
                     art_img = Image.open(self.art_cache[item["code"]])
 
-                draw.text((box_x + 40, y + (box_h * 0.35)), item["code"], fill=c_txt, font=day_f, anchor="lm")
+                draw.text((box_x + left_margin, y + (box_h * 0.35)), item["code"], fill=c_txt, font=day_f, anchor="lm")
                 
                 times = self.get_converted_time(item['time'].get(), self.my_zone.get(), self.sec_zone.get(), self.show_primary.get())
                 ty = y + (box_h * 0.60)
+                
                 for t_str in times:
-                    draw.text((box_x + 40, ty), t_str, fill=c_sub, font=time_f, anchor="lm"); ty += time_f_size + 5
+                    draw.text((box_x + left_margin, ty), t_str, fill=c_sub, font=time_f, anchor="lm")
+                    ty += time_f_size + 5
 
-                text_x = box_x + 240 
+                # --- MASTER VERTICAL ALIGNMENT ---
+                # Game Titles now always start exactly 25px after the dedicated Left Column width
+                text_x = box_x + left_margin + left_col_w + 25 
                 art_x = box_x + box_w - 20
                 
                 if art_img and box_h > 50:
@@ -546,19 +603,32 @@ del "%~f0"
                         img.paste(art, (art_x, y + 20), mask)
                     except: pass
                 
-                max_text_w = max(20, art_x - text_x - 30)
-                g_lines = textwrap.wrap(g_val, width=max(8, int(max_text_w / (game_f_size * 0.55))))
-                s_lines = textwrap.wrap(s_val, width=max(12, int(max_text_w / (sub_f_size * 0.50)))) if s_val else []
+                max_text_w = max(20, art_x - text_x - 20)
+                game_f = self.get_f_path(local_g_size)
+                sub_f = self.get_f_path(local_s_size)
                 
-                total_h = len(g_lines) * (game_f_size + 8) + (len(s_lines) * (sub_f_size + 8) + 10 if s_lines else 0)
+                g_lines = self.wrap_text_pil(g_val, game_f, max_text_w)[:3] 
+                s_lines = self.wrap_text_pil(s_val, sub_f, max_text_w)[:2] if s_val else []
+                
+                total_h = len(g_lines) * (local_g_size + 8) + (len(s_lines) * (local_s_size + 8) + 10 if s_lines else 0)
+                
+                while total_h > (box_h * 0.85) and (local_g_size > 10 or local_s_size > 10):
+                    if local_g_size > 10: local_g_size -= 2
+                    if local_s_size > 10: local_s_size -= 2
+                    game_f = self.get_f_path(local_g_size)
+                    sub_f = self.get_f_path(local_s_size)
+                    g_lines = self.wrap_text_pil(g_val, game_f, max_text_w)[:3] 
+                    s_lines = self.wrap_text_pil(s_val, sub_f, max_text_w)[:2] if s_val else []
+                    total_h = len(g_lines) * (local_g_size + 8) + (len(s_lines) * (local_s_size + 8) + 10 if s_lines else 0)
+
                 gy = y + (box_h // 2) - (total_h // 2) 
                 
                 for line in g_lines:
-                    draw.text((text_x, gy), line, fill=c_txt, font=game_f); gy += game_f_size + 8
+                    draw.text((text_x, gy), line, fill=c_txt, font=game_f); gy += local_g_size + 8
                 if s_lines:
                     gy += 10 
                     for line in s_lines:
-                        draw.text((text_x, gy), line, fill=c_sub, font=sub_f); gy += sub_f_size + 8
+                        draw.text((text_x, gy), line, fill=c_sub, font=sub_f); gy += local_s_size + 8
 
         if has_goal or has_logo:
             sp_y = ch - 30
@@ -817,6 +887,9 @@ del "%~f0"
         self.header_size_slider = self.add_slider(side, "Main Title Size", "header_size", 50, 150)
         self.header_sub_size_slider = self.add_slider(side, "Date Range Size", "sub_size", 20, 80)
         
+        self.game_size_slider = self.add_slider(side, "Game Title Size", "game_size", 20, 80)
+        self.sub_size_slider = self.add_slider(side, "Subtitle Size", "subtitle_size", 15, 60)
+        
         col_f = ctk.CTkFrame(side, fg_color="transparent"); col_f.pack(fill="x", padx=10, pady=5)
         ctk.CTkButton(col_f, text="🎨 Box Background", command=lambda: self.pick_color_generic("box_color")).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
         ctk.CTkButton(col_f, text="🎨 Box Text", command=lambda: self.pick_color_generic("box_txt_color")).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
@@ -910,7 +983,7 @@ del "%~f0"
         self.hide_all_suggest(); self.focus(); threading.Thread(target=lambda: asyncio.run(self.up_art(val, self.days_ui_list[idx]["code"])), daemon=True).start()
     
     def save_settings(self):
-        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get()})
+        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get(), "game_size":self.game_size_slider.get(), "subtitle_size":self.sub_size_slider.get()})
         with open(self.settings_path, "w") as f: json.dump(self.cfg, f, indent=4)
         self.refresh_status(); messagebox.showinfo("Saved", "Settings Saved Securely!"); self.schedule_preview()
 
