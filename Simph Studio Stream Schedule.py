@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.11"
+        self.APP_VERSION = "0.1.13"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -25,6 +25,22 @@ class SimphStudio(ctk.CTk):
         self.title(f"Simph Studio - Ver {self.APP_VERSION}")
         self.geometry("1650x1000")
         ctk.set_appearance_mode("dark")
+        
+        # --- TASKBAR & WINDOW ICON FIX ---
+        try:
+            # Tells Windows this is a unique app, preventing generic taskbar icon grouping
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"simph.studio.app.{self.APP_VERSION}")
+        except: pass
+        
+        icon_path = self.get_resource_path("logo.ico")
+        if os.path.exists(icon_path):
+            try: self.iconbitmap(icon_path)
+            except: pass
+        elif getattr(sys, 'frozen', False):
+            # Backup: If compiled, try to read the icon directly from the .exe metadata
+            try: self.iconbitmap(sys.executable)
+            except: pass
         
         # --- APPDATA VAULT SETUP ---
         self.appdata_dir = os.path.join(os.getenv('LOCALAPPDATA', os.path.expanduser('~')), 'SimphStudio')
@@ -41,7 +57,7 @@ class SimphStudio(ctk.CTk):
         self._resize_timer = None
         self.selected_start_date = datetime.date.today()
         
-        # --- CANVAS RATIOS (INFO PANEL REMOVED) ---
+        # --- CLEANED CANVAS RATIOS ---
         self.ratios = {
             "9:16 (TikTok/Reels/Shorts)": (1080, 1920),
             "16:9 (Desktop/YouTube)": (1920, 1080),
@@ -99,6 +115,16 @@ class SimphStudio(ctk.CTk):
         self.after(1200, self.refresh_status)
         self.after(2000, self.check_for_updates)
 
+    # --- UTILITY: GET RESOURCE PATH ---
+    def get_resource_path(self, relative_path):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
+
     def log(self, text):
         self.console.insert("end", f"> {text}\n")
         self.console.see("end")
@@ -126,7 +152,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- AUTO-UPDATER ---
+    # --- TRUE AUTO-UPDATER LOGIC ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -191,9 +217,10 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Ghost Script...")
+                self.log("🚀 Preparing Fortified Ghost Script...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
+                exe_dir = os.path.dirname(current_exe)
                 new_exe_path = os.path.join(extract_dir, exe_name)
                 
                 if not os.path.exists(new_exe_path):
@@ -203,10 +230,13 @@ class SimphStudio(ctk.CTk):
                             break
                 
                 bat_path = os.path.join(self.appdata_dir, "update.bat")
+                
                 bat_content = f"""@echo off
 echo Installing new Simph Studio Update...
-timeout /t 3 /nobreak > NUL
+echo Please wait for the old application to close completely.
+timeout /t 5 /nobreak > NUL
 move /Y "{new_exe_path}" "{current_exe}"
+cd /d "{exe_dir}"
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
 del "{zip_path}"
@@ -230,9 +260,9 @@ del "%~f0"
             "Welcome to the Streamer Schedule Planner!\n\n"
             "► LINK TWITCH: Go to 'App Settings' to link Twitch. This unlocks the game search dropdown and dynamic box art.\n"
             "► TICK DAYS: Use the checkboxes on the left to activate days you plan to stream.\n"
-            "► EXPORT: Instantly generates high-quality images of all your ticked formats and saves them straight to a folder on your Desktop.\n"
-            "► DEPLOY: Silently updates your Discord server and syncs your Twitch schedule in the background without exporting everything.\n"
-            "► CUSTOM ART: Click the [🖼️] button next to any day to upload your own custom image instead of Twitch box art."
+            "► MULTI-EXPORT: Tick the formats you want on the left. Deploying will save them all to a folder on your Desktop!\n"
+            "► CUSTOM ART: Click the [🖼️] button next to any day to upload your own custom image instead of Twitch box art.\n"
+            "► DEPLOY: Hitting deploy sends the preview image to Discord and updates your actual Twitch schedule automatically!"
         )
         messagebox.showinfo("Simph Studio User Guide", msg)
 
@@ -354,9 +384,7 @@ del "%~f0"
         self.prev_height = event.height
         self._resize_timer = self.after(200, self.schedule_preview)
 
-    # --- REFACTORED: IMAGE RENDERER IS NOW STANDALONE ---
     def render_schedule_image(self, target_format):
-        # Fetching our new Goal logic variables safely
         sp_title = self.sponsor_title.get().strip() if hasattr(self, 'sponsor_title') else ""
         sp_cur_str = self.goal_current.get().strip() if hasattr(self, 'goal_current') else ""
         sp_tgt_str = self.goal_target.get().strip() if hasattr(self, 'goal_target') else ""
@@ -410,11 +438,7 @@ del "%~f0"
         checked = [item for item in self.days_ui_list if item["check"].get()]
         if checked:
             count = len(checked)
-            
-            # --- DYNAMIC PADDING FOR GOAL BAR & LOGO ---
-            bottom_padding = 60
-            if has_goal and has_logo: bottom_padding = 220
-            elif has_goal or has_logo: bottom_padding = 150
+            bottom_padding = 150 if (sp_title or sp_cur_str or sp_tgt_str or os.path.exists(sp_path)) else 60
             
             available_space = max(10, ch - header_y - bottom_padding)
             
@@ -441,7 +465,6 @@ del "%~f0"
             
             max_allowed = int(self.max_box_slider.get())
             calc_h = int((available_space / items_per_col) * 0.85)
-            
             box_h = max(10, min(max_allowed, calc_h)) 
             
             spacing = min(40, int((available_space - (box_h * items_per_col)) / (items_per_col + 1))) if items_per_col > 1 else 0
@@ -529,11 +552,9 @@ del "%~f0"
                     for line in s_lines:
                         draw.text((text_x, gy), line, fill=c_sub, font=sub_f); gy += sub_f_size + 8
 
-        # --- GOAL BAR AND LOGO RENDERING ENGINE ---
         if has_goal or has_logo:
             sp_y = ch - 30
             
-            # 1. Handle Progress Bar and Title
             if has_goal:
                 try:
                     cur_val = float(sp_cur_str) if sp_cur_str else 0
@@ -541,37 +562,31 @@ del "%~f0"
                 except:
                     cur_val, tgt_val = 0, 0
                 
-                # Render Bar only if a target exists
                 if tgt_val > 0:
                     bar_w = int(cw * 0.4)
                     bar_h = max(20, int(ch * 0.025))
                     bar_x = cw//2 - bar_w//2
                     bar_y = sp_y - bar_h
                     
-                    # Empty Background Bar
                     draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=bar_h//2, fill=(40, 40, 40, 200), outline=c_sub, width=2)
                     
-                    # Filled Foreground Bar
                     pct = max(0.0, min(1.0, cur_val / tgt_val))
                     fill_w = int(bar_w * pct)
                     if fill_w > 0:
                         fill_w = max(fill_w, bar_h) 
                         draw.rounded_rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h], radius=bar_h//2, fill=c_head)
                     
-                    # Inner Text with Outline for pure visibility
                     prog_font = self.get_f_path(max(12, int(bar_h * 0.6)))
                     prog_text = f"{sp_cur_str} / {sp_tgt_str}"
                     draw.text((cw//2, bar_y + bar_h//2), prog_text, fill=(255, 255, 255), font=prog_font, anchor="mm", stroke_width=1, stroke_fill=(0,0,0))
                     
                     sp_y = bar_y - 15
 
-                # Render Goal Title
                 if sp_title:
                     sp_font = self.get_f_path(max(20, int(ch * 0.025)))
                     draw.text((cw//2, sp_y), sp_title, fill=c_txt, font=sp_font, anchor="md")
                     sp_y -= int(ch * 0.035) + 5
             
-            # 2. Handle Attached Logo
             if has_logo:
                 try:
                     s_logo = Image.open(sp_path).convert("RGBA")
@@ -599,7 +614,6 @@ del "%~f0"
             img.convert("RGB").save("schedule_final.jpg", quality=95)
         except Exception as e: self.log(f"Renderer Note: {e}")
 
-    # --- SEPARATED EXPORT ENGINE ---
     def start_export(self):
         threading.Thread(target=self.run_export, daemon=True).start()
 
@@ -624,7 +638,6 @@ del "%~f0"
         else:
             self.log("⚠️ No formats ticked for export!")
 
-    # --- SEPARATED DEPLOY ENGINE ---
     def start_deploy(self): threading.Thread(target=lambda: asyncio.run(self.run_engine()), daemon=True).start()
     async def run_engine(self):
         self.log("🚀 Starting Global Deployment...")
@@ -726,7 +739,7 @@ del "%~f0"
         self.add_manual(hp_f, "2. Get Twitch API Keys", "1. Go to the Twitch Dev Console.\n2. Click 'Register Your Application'.\n3. Set OAuth Redirect URL EXACTLY to: http://localhost:17563\n4. Set Category to 'Application Integration'.\n5. Hit create, then COPY your Client ID and GENERATE A NEW SECRET.\n\n⚠️ IMPORTANT: You MUST copy the Client Secret before closing the page!", "https://dev.twitch.tv/console")
         self.add_manual(hp_f, "3. Link Your Account", "1. Paste your new Client ID on the left.\n2. Click 'OPEN AUTH LINK' and hit Authorize.\n3. Your browser will show a 'Refused to Connect' error—this is totally normal!\n4. COPY the entire long URL from the address bar.\n5. Paste it into the 'PASTE BROKEN URL' box and click EXTRACT.", None)
         self.add_manual(hp_f, "4. Discord Webhook Setup", "Go to your Discord Server Settings > Integrations > Webhooks. Create a new webhook for your schedule channel, copy the URL, and paste it on the left.", "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks")
-        self.add_manual(hp_f, "5. App Layouts & Features", "► OFFLINE MODE: Tick the 'Offline' box next to a day to grey it out. Perfect for showing a full 7-day week when you only stream on 3 days.\n\n► CUSTOM ART: Click the [🖼️] button next to a day to upload custom box art. To remove it, just click the button again.\n\n► CANVAS SIZE: Change Image Width/Height to fit your needs (1080x1920 for phones, 1920x1080 for desktop monitors). If you make the canvas wider than it is tall, the app will smartly switch to a Two-Column Landscape Layout automatically!", None)
+        self.add_manual(hp_f, "5. App Layouts & Features", "► OFFLINE MODE: Tick the 'Offline' box next to a day to grey it out. Perfect for showing a full 7-day week when you only stream on 3 days.\n\n► CUSTOM ART: Click the [🖼️] button next to a day to upload custom box art. To remove it, just click the button again.\n\n► EXPORT VS DEPLOY: Use Export to save the ticked layout sizes to a folder on your Desktop. Use Deploy to instantly upload the preview canvas directly to your Discord server and update your Twitch schedule tab.", None)
 
     def add_section_header(self, parent, text):
         ctk.CTkLabel(parent, text=text, font=("Arial", 11, "bold"), text_color="#777777").pack(pady=(15, 2))
