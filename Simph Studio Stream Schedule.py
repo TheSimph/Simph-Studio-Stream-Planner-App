@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.7"
+        self.APP_VERSION = "0.1.11"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -41,15 +41,12 @@ class SimphStudio(ctk.CTk):
         self._resize_timer = None
         self.selected_start_date = datetime.date.today()
         
-        # --- CANVAS RATIOS ---
+        # --- CANVAS RATIOS (INFO PANEL REMOVED) ---
         self.ratios = {
-            "9:16 (TikTok / Reels / Phone)": (1080, 1920),
-            "16:9 (Desktop / YouTube / TV)": (1920, 1080),
-            "1:1 (Square for Social Feeds)": (1080, 1080),
-            "4:5 (Vertical Instagram Post)": (1080, 1350),
-            "3:2 (Standard Wide Photo)": (1080, 720),
-            "Twitch Offline Banner (16:9)": (1920, 1080),
-            "Twitch Info Panel (Wide)": (1200, 400)
+            "9:16 (TikTok/Reels/Shorts)": (1080, 1920),
+            "16:9 (Desktop/YouTube)": (1920, 1080),
+            "1:1 (Square/Instagram)": (1080, 1080),
+            "4:5 (Vertical Post)": (1080, 1350)
         }
 
         # --- MASSIVE FONT DICTIONARY ---
@@ -121,14 +118,15 @@ class SimphStudio(ctk.CTk):
             "header_txt_color": "#FFFFFF", "sub_txt_color": "#C8C8C8", "box_txt_color": "#FFFFFF",
             "header_text": "STREAMER SCHEDULE", "header_size": 100, "sub_size": 40, "logo_size": 200,
             "my_zone": "UK (GMT/BST)", "sec_zone": "US East (EST/EDT)", "start_day": "MON",
-            "canvas_format": "9:16 (TikTok / Reels / Phone)", "max_box_h": 250, "time_fmt": "24-Hour (20:00)", "show_primary": True
+            "canvas_format": "9:16 (TikTok/Reels/Shorts)", "max_box_h": 250, "time_fmt": "24-Hour (20:00)", "show_primary": True,
+            "sponsor_title": "", "goal_current": "", "goal_target": "", "sponsor_path": ""
         }
 
     def schedule_preview(self, *args):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- TRUE AUTO-UPDATER LOGIC ---
+    # --- AUTO-UPDATER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -199,7 +197,6 @@ class SimphStudio(ctk.CTk):
                 new_exe_path = os.path.join(extract_dir, exe_name)
                 
                 if not os.path.exists(new_exe_path):
-                    # Fallback in case they nested it in a folder inside the zip
                     for root, dirs, files in os.walk(extract_dir):
                         if exe_name in files:
                             new_exe_path = os.path.join(root, exe_name)
@@ -233,9 +230,9 @@ del "%~f0"
             "Welcome to the Streamer Schedule Planner!\n\n"
             "► LINK TWITCH: Go to 'App Settings' to link Twitch. This unlocks the game search dropdown and dynamic box art.\n"
             "► TICK DAYS: Use the checkboxes on the left to activate days you plan to stream.\n"
-            "► OFFLINE MODE: Tick 'Offline' next to a day to completely grey it out on the schedule.\n"
-            "► CUSTOM ART: Click the [🖼️] button next to any day to upload your own custom image instead of Twitch box art.\n"
-            "► DEPLOY: Hitting deploy sends the image to Discord (via Webhook) and updates your actual Twitch schedule automatically!"
+            "► EXPORT: Instantly generates high-quality images of all your ticked formats and saves them straight to a folder on your Desktop.\n"
+            "► DEPLOY: Silently updates your Discord server and syncs your Twitch schedule in the background without exporting everything.\n"
+            "► CUSTOM ART: Click the [🖼️] button next to any day to upload your own custom image instead of Twitch box art."
         )
         messagebox.showinfo("Simph Studio User Guide", msg)
 
@@ -357,196 +354,238 @@ del "%~f0"
         self.prev_height = event.height
         self._resize_timer = self.after(200, self.schedule_preview)
 
-    # --- MASTER DRAWING ENGINE ---
+    # --- REFACTORED: IMAGE RENDERER IS NOW STANDALONE ---
+    def render_schedule_image(self, target_format):
+        # Fetching our new Goal logic variables safely
+        sp_title = self.sponsor_title.get().strip() if hasattr(self, 'sponsor_title') else ""
+        sp_cur_str = self.goal_current.get().strip() if hasattr(self, 'goal_current') else ""
+        sp_tgt_str = self.goal_target.get().strip() if hasattr(self, 'goal_target') else ""
+        sp_path = self.cfg.get("sponsor_path", "")
+        
+        has_goal = bool(sp_title or sp_cur_str or sp_tgt_str)
+        has_logo = os.path.exists(sp_path)
+        
+        cw, ch = self.ratios.get(target_format, (1080, 1920))
+        is_landscape = cw > ch
+        
+        if os.path.exists(self.cfg.get("bg_path", "background.jpg")):
+            raw_bg = Image.open(self.cfg.get("bg_path", "background.jpg")).convert("RGBA")
+            base_fit = ImageOps.fit(raw_bg, (cw, ch), method=Image.Resampling.LANCZOS)
+            zoom = int(self.bg_zoom_slider.get()) / 100.0
+            if zoom > 1.0:
+                new_w, new_h = int(cw / zoom), int(ch / zoom)
+                left, top = (cw - new_w) // 2, (ch - new_h) // 2
+                img = base_fit.crop((left, top, left + new_w, top + new_h)).resize((cw, ch), Image.Resampling.LANCZOS)
+            elif zoom < 1.0:
+                img = Image.new("RGBA", (cw, ch), (10, 10, 12, 255))
+                fit_w, fit_h = int(cw * zoom), int(ch * zoom)
+                scaled = base_fit.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+                img.paste(scaled, (cw//2 - fit_w//2, ch//2 - fit_h//2))
+            else: img = base_fit
+        else: img = Image.new("RGBA", (cw, ch), (20, 20, 25, 255))
+        
+        draw = ImageDraw.Draw(img)
+        opacity = int(self.box_opacity_slider.get())
+        c_box = (*self.hex_to_rgb(self.cfg.get("box_color", "#6E1414")), opacity)
+        c_head, c_sub, c_txt = self.hex_to_rgb(self.cfg.get("header_txt_color", "#FFFFFF")), self.hex_to_rgb(self.cfg.get("sub_txt_color", "#C8C8C8")), self.hex_to_rgb(self.cfg.get("box_txt_color", "#FFFFFF"))
+
+        header_y = int(ch * 0.03)
+        if os.path.exists(self.cfg.get("logo_path", "logo.png")):
+            l_s = int(self.logo_size_slider.get())
+            logo = ImageOps.contain(Image.open(self.cfg.get("logo_path", "logo.png")).convert("RGBA"), (l_s, l_s))
+            img.paste(logo, (cw//2 - (logo.width//2), header_y), logo)
+            header_y += l_s + 20 
+        
+        h_text, h_size = self.header_entry.get().upper(), int(self.header_size_slider.get())
+        for line in textwrap.wrap(h_text, width=max(8, int((cw*0.85) / (h_size * 0.7)))):
+            draw.text((cw//2, header_y), line, fill=c_head, font=self.get_f_path(h_size), anchor="mt")
+            header_y += h_size + 15
+            
+        s_text, s_size = self.header_sub_entry.get().upper(), int(self.header_sub_size_slider.get())
+        header_y += 10
+        for line in textwrap.wrap(s_text, width=max(12, int((cw*0.85) / (s_size * 0.55)))):
+            draw.text((cw//2, header_y), line, fill=c_sub, font=self.get_f_path(s_size), anchor="mt")
+            header_y += s_size + 15
+
+        checked = [item for item in self.days_ui_list if item["check"].get()]
+        if checked:
+            count = len(checked)
+            
+            # --- DYNAMIC PADDING FOR GOAL BAR & LOGO ---
+            bottom_padding = 60
+            if has_goal and has_logo: bottom_padding = 220
+            elif has_goal or has_logo: bottom_padding = 150
+            
+            available_space = max(10, ch - header_y - bottom_padding)
+            
+            positions = [] 
+            if is_landscape and count > 3:
+                cols = 2
+                items_per_col = math.ceil(count / 2)
+                if count % 2 != 0: 
+                    left_items = (count - 1) // 2
+                    for idx in range(count):
+                        if idx < left_items: positions.append((0, idx))
+                        elif idx < count - 1: positions.append((1, idx - left_items))
+                        else: positions.append((0.5, items_per_col - 1))
+                else:
+                    left_items = count // 2
+                    for idx in range(count):
+                        if idx < left_items: positions.append((0, idx))
+                        else: positions.append((1, idx - left_items))
+            else:
+                cols = 1
+                items_per_col = count
+                for idx in range(count):
+                    positions.append((0, idx))
+            
+            max_allowed = int(self.max_box_slider.get())
+            calc_h = int((available_space / items_per_col) * 0.85)
+            
+            box_h = max(10, min(max_allowed, calc_h)) 
+            
+            spacing = min(40, int((available_space - (box_h * items_per_col)) / (items_per_col + 1))) if items_per_col > 1 else 0
+            start_y = header_y + 30
+            total_drawn_h = (box_h * items_per_col) + (spacing * (items_per_col - 1))
+            if total_drawn_h < available_space: start_y += (available_space - total_drawn_h) // 2
+
+            col_w = (cw - 120) // cols if cols > 1 else (cw - 160)
+            box_w = col_w - 40 if cols > 1 else col_w
+
+            overlay = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+            draw_overlay = ImageDraw.Draw(overlay)
+            
+            for idx, item in enumerate(checked):
+                c, r = positions[idx]
+                box_x = int(80 + (c * col_w))
+                if cols > 1 and c == 0.5: box_x = (cw - box_w) // 2
+                y = int(start_y + (r * (box_h + spacing)))
+                
+                is_off = item['offline'].get()
+                fill_c = (70, 70, 70, opacity) if is_off else c_box
+                draw_overlay.rounded_rectangle([box_x, y, box_x + box_w, y + box_h], 30, fill=fill_c)
+                
+            img = Image.alpha_composite(img, overlay); draw = ImageDraw.Draw(img) 
+
+            day_f = self.get_f_path(min(65, int(box_h * 0.30))); day_f_size = min(65, int(box_h * 0.30))
+            time_f = self.get_f_path(min(30, int(box_h * 0.15))); time_f_size = min(30, int(box_h * 0.15))
+            game_f = self.get_f_path(min(45, int(box_h * 0.22))); game_f_size = min(45, int(box_h * 0.22))
+            sub_f = self.get_f_path(min(38, int(box_h * 0.18))); sub_f_size = min(38, int(box_h * 0.18))
+
+            for idx, item in enumerate(checked):
+                c, r = positions[idx]
+                box_x = int(80 + (c * col_w))
+                if cols > 1 and c == 0.5: box_x = (cw - box_w) // 2
+                y = int(start_y + (r * (box_h + spacing)))
+                
+                is_off = item['offline'].get()
+                
+                if is_off:
+                    draw.text((box_x + 40, y + (box_h * 0.5)), item["code"], fill=c_txt, font=day_f, anchor="lm")
+                    draw.text((box_x + 280, y + (box_h * 0.5)), "OFFLINE", fill=c_sub, font=game_f, anchor="lm")
+                    continue
+
+                raw_g = item["game"].get().strip().upper()
+                g_val = raw_g if raw_g else "TBA"
+                s_val = item["sub"].get().strip()
+                
+                art_img = None
+                if item.get("custom_art") and os.path.exists(item["custom_art"]):
+                    art_img = Image.open(item["custom_art"])
+                elif item["code"] in self.art_cache and raw_g:
+                    art_img = Image.open(self.art_cache[item["code"]])
+
+                draw.text((box_x + 40, y + (box_h * 0.35)), item["code"], fill=c_txt, font=day_f, anchor="lm")
+                
+                times = self.get_converted_time(item['time'].get(), self.my_zone.get(), self.sec_zone.get(), self.show_primary.get())
+                ty = y + (box_h * 0.60)
+                for t_str in times:
+                    draw.text((box_x + 40, ty), t_str, fill=c_sub, font=time_f, anchor="lm"); ty += time_f_size + 5
+
+                text_x = box_x + 240 
+                art_x = box_x + box_w - 20
+                
+                if art_img and box_h > 50:
+                    art_h = box_h - 40; art_w = int(art_h * 0.75)
+                    art_x = box_x + box_w - 20 - art_w
+                    try:
+                        art = ImageOps.fit(art_img.convert("RGBA"), (art_w, art_h))
+                        mask = Image.new("L", (art_w, art_h), 0)
+                        ImageDraw.Draw(mask).rounded_rectangle([0, 0, art_w, art_h], 15, 255)
+                        img.paste(art, (art_x, y + 20), mask)
+                    except: pass
+                
+                max_text_w = max(20, art_x - text_x - 30)
+                g_lines = textwrap.wrap(g_val, width=max(8, int(max_text_w / (game_f_size * 0.55))))
+                s_lines = textwrap.wrap(s_val, width=max(12, int(max_text_w / (sub_f_size * 0.50)))) if s_val else []
+                
+                total_h = len(g_lines) * (game_f_size + 8) + (len(s_lines) * (sub_f_size + 8) + 10 if s_lines else 0)
+                gy = y + (box_h // 2) - (total_h // 2) 
+                
+                for line in g_lines:
+                    draw.text((text_x, gy), line, fill=c_txt, font=game_f); gy += game_f_size + 8
+                if s_lines:
+                    gy += 10 
+                    for line in s_lines:
+                        draw.text((text_x, gy), line, fill=c_sub, font=sub_f); gy += sub_f_size + 8
+
+        # --- GOAL BAR AND LOGO RENDERING ENGINE ---
+        if has_goal or has_logo:
+            sp_y = ch - 30
+            
+            # 1. Handle Progress Bar and Title
+            if has_goal:
+                try:
+                    cur_val = float(sp_cur_str) if sp_cur_str else 0
+                    tgt_val = float(sp_tgt_str) if sp_tgt_str else 0
+                except:
+                    cur_val, tgt_val = 0, 0
+                
+                # Render Bar only if a target exists
+                if tgt_val > 0:
+                    bar_w = int(cw * 0.4)
+                    bar_h = max(20, int(ch * 0.025))
+                    bar_x = cw//2 - bar_w//2
+                    bar_y = sp_y - bar_h
+                    
+                    # Empty Background Bar
+                    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=bar_h//2, fill=(40, 40, 40, 200), outline=c_sub, width=2)
+                    
+                    # Filled Foreground Bar
+                    pct = max(0.0, min(1.0, cur_val / tgt_val))
+                    fill_w = int(bar_w * pct)
+                    if fill_w > 0:
+                        fill_w = max(fill_w, bar_h) 
+                        draw.rounded_rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h], radius=bar_h//2, fill=c_head)
+                    
+                    # Inner Text with Outline for pure visibility
+                    prog_font = self.get_f_path(max(12, int(bar_h * 0.6)))
+                    prog_text = f"{sp_cur_str} / {sp_tgt_str}"
+                    draw.text((cw//2, bar_y + bar_h//2), prog_text, fill=(255, 255, 255), font=prog_font, anchor="mm", stroke_width=1, stroke_fill=(0,0,0))
+                    
+                    sp_y = bar_y - 15
+
+                # Render Goal Title
+                if sp_title:
+                    sp_font = self.get_f_path(max(20, int(ch * 0.025)))
+                    draw.text((cw//2, sp_y), sp_title, fill=c_txt, font=sp_font, anchor="md")
+                    sp_y -= int(ch * 0.035) + 5
+            
+            # 2. Handle Attached Logo
+            if has_logo:
+                try:
+                    s_logo = Image.open(sp_path).convert("RGBA")
+                    logo_h = int(ch * 0.08)
+                    s_logo = ImageOps.contain(s_logo, (cw//2, logo_h))
+                    img.paste(s_logo, (cw//2 - s_logo.width//2, sp_y - s_logo.height), s_logo)
+                except: pass
+
+        return img
+
     def generate_preview_image(self, *args):
         try:
-            cw, ch = self.ratios.get(self.canvas_format.get(), (1080, 1920))
-            is_landscape = cw > ch
-            
-            if os.path.exists(self.cfg.get("bg_path", "background.jpg")):
-                raw_bg = Image.open(self.cfg.get("bg_path", "background.jpg")).convert("RGBA")
-                base_fit = ImageOps.fit(raw_bg, (cw, ch), method=Image.Resampling.LANCZOS)
-                zoom = int(self.bg_zoom_slider.get()) / 100.0
-                if zoom > 1.0:
-                    new_w, new_h = int(cw / zoom), int(ch / zoom)
-                    left, top = (cw - new_w) // 2, (ch - new_h) // 2
-                    img = base_fit.crop((left, top, left + new_w, top + new_h)).resize((cw, ch), Image.Resampling.LANCZOS)
-                elif zoom < 1.0:
-                    img = Image.new("RGBA", (cw, ch), (10, 10, 12, 255))
-                    fit_w, fit_h = int(cw * zoom), int(ch * zoom)
-                    scaled = base_fit.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
-                    img.paste(scaled, (cw//2 - fit_w//2, ch//2 - fit_h//2))
-                else: img = base_fit
-            else: img = Image.new("RGBA", (cw, ch), (20, 20, 25, 255))
-            
-            draw = ImageDraw.Draw(img)
-            opacity = int(self.box_opacity_slider.get())
-            c_box = (*self.hex_to_rgb(self.cfg.get("box_color", "#6E1414")), opacity)
-            c_head, c_sub, c_txt = self.hex_to_rgb(self.cfg.get("header_txt_color", "#FFFFFF")), self.hex_to_rgb(self.cfg.get("sub_txt_color", "#C8C8C8")), self.hex_to_rgb(self.cfg.get("box_txt_color", "#FFFFFF"))
-
-            header_y = int(ch * 0.03)
-            if os.path.exists(self.cfg.get("logo_path", "logo.png")):
-                l_s = int(self.logo_size_slider.get())
-                logo = ImageOps.contain(Image.open(self.cfg.get("logo_path", "logo.png")).convert("RGBA"), (l_s, l_s))
-                img.paste(logo, (cw//2 - (logo.width//2), header_y), logo)
-                header_y += l_s + 20 
-            
-            # --- TITLE WRAPPING FIX ---
-            h_text, h_size = self.header_entry.get().upper(), int(self.header_size_slider.get())
-            for line in textwrap.wrap(h_text, width=max(8, int((cw*0.85) / (h_size * 0.7)))):
-                draw.text((cw//2, header_y), line, fill=c_head, font=self.get_f_path(h_size), anchor="mt")
-                header_y += h_size + 15
-                
-            s_text, s_size = self.header_sub_entry.get().upper(), int(self.header_sub_size_slider.get())
-            header_y += 10
-            for line in textwrap.wrap(s_text, width=max(12, int((cw*0.85) / (s_size * 0.55)))):
-                draw.text((cw//2, header_y), line, fill=c_sub, font=self.get_f_path(s_size), anchor="mt")
-                header_y += s_size + 15
-
-            checked = [item for item in self.days_ui_list if item["check"].get()]
-            if checked:
-                count = len(checked)
-                available_space = ch - header_y - 60 
-                
-                positions = [] 
-                if is_landscape and count > 3:
-                    cols = 2
-                    items_per_col = math.ceil(count / 2)
-                    if count % 2 != 0: 
-                        left_items = (count - 1) // 2
-                        for idx in range(count):
-                            if idx < left_items: positions.append((0, idx))
-                            elif idx < count - 1: positions.append((1, idx - left_items))
-                            else: positions.append((0.5, items_per_col - 1))
-                    else:
-                        left_items = count // 2
-                        for idx in range(count):
-                            if idx < left_items: positions.append((0, idx))
-                            else: positions.append((1, idx - left_items))
-                else:
-                    cols = 1
-                    items_per_col = count
-                    for idx in range(count):
-                        positions.append((0, idx))
-                
-                max_allowed = int(self.max_box_slider.get())
-                calc_h = int((available_space / items_per_col) * 0.85)
-                box_h = min(max_allowed, calc_h)
-                
-                spacing = min(40, int((available_space - (box_h * items_per_col)) / (items_per_col + 1))) if items_per_col > 1 else 0
-                start_y = header_y + 30
-                total_drawn_h = (box_h * items_per_col) + (spacing * (items_per_col - 1))
-                if total_drawn_h < available_space: start_y += (available_space - total_drawn_h) // 2
-
-                col_w = (cw - 120) // cols if cols > 1 else (cw - 160)
-                box_w = col_w - 40 if cols > 1 else col_w
-
-                overlay = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-                draw_overlay = ImageDraw.Draw(overlay)
-                
-                for idx, item in enumerate(checked):
-                    c, r = positions[idx]
-                    box_x = int(80 + (c * col_w))
-                    if cols > 1 and c == 0.5: box_x = (cw - box_w) // 2
-                    y = int(start_y + (r * (box_h + spacing)))
-                    
-                    is_off = item['offline'].get()
-                    fill_c = (70, 70, 70, opacity) if is_off else c_box
-                    draw_overlay.rounded_rectangle([box_x, y, box_x + box_w, y + box_h], 30, fill=fill_c)
-                    
-                img = Image.alpha_composite(img, overlay); draw = ImageDraw.Draw(img) 
-
-                is_stacked = cols == 1 and count <= 3 and box_h > 200
-                day_f = self.get_f_path(min(65, int(box_h * 0.30))); day_f_size = min(65, int(box_h * 0.30))
-                time_f = self.get_f_path(min(28, int(box_h * 0.14))); time_f_size = min(28, int(box_h * 0.14))
-                game_f = self.get_f_path(min(45, int(box_h * 0.22))); game_f_size = min(45, int(box_h * 0.22))
-                sub_f = self.get_f_path(min(30, int(box_h * 0.15))); sub_f_size = min(30, int(box_h * 0.15))
-
-                for idx, item in enumerate(checked):
-                    c, r = positions[idx]
-                    box_x = int(80 + (c * col_w))
-                    if cols > 1 and c == 0.5: box_x = (cw - box_w) // 2
-                    y = int(start_y + (r * (box_h + spacing)))
-                    
-                    is_off = item['offline'].get()
-                    
-                    if is_off:
-                        if is_stacked:
-                            draw.text((box_x + box_w//2, y + box_h*0.35), "OFFLINE", fill=c_sub, font=game_f, anchor="mm")
-                            draw.text((box_x + box_w//2, y + box_h*0.65), item['code'], fill=c_txt, font=day_f, anchor="mm")
-                        else:
-                            draw.text((box_x + 40, y + (box_h * 0.5)), item["code"], fill=c_txt, font=day_f, anchor="lm")
-                            draw.text((box_x + 280, y + (box_h * 0.5)), "OFFLINE", fill=c_sub, font=game_f, anchor="lm")
-                        continue
-
-                    raw_g = item["game"].get().strip().upper()
-                    g_val = raw_g if raw_g else "TBA"
-                    s_val = item["sub"].get().strip()
-                    
-                    art_img = None
-                    if item.get("custom_art") and os.path.exists(item["custom_art"]):
-                        art_img = Image.open(item["custom_art"])
-                    elif item["code"] in self.art_cache and raw_g:
-                        art_img = Image.open(self.art_cache[item["code"]])
-
-                    if is_stacked:
-                        day_f_st = self.get_f_path(min(38, int(box_h * 0.10))); day_f_size_st = min(38, int(box_h * 0.10))
-                        time_f_st = self.get_f_path(min(28, int(box_h * 0.08))); time_f_size_st = min(28, int(box_h * 0.08))
-                        
-                        if art_img:
-                            art_h = int(box_h * 0.40); art_w = int(art_h * 0.75)
-                            art = ImageOps.fit(art_img.convert("RGBA"), (art_w, art_h))
-                            mask = Image.new("L", (art_w, art_h), 0)
-                            ImageDraw.Draw(mask).rounded_rectangle([0, 0, art_w, art_h], 15, 255)
-                            img.paste(art, (box_x + box_w//2 - art_w//2, y + 20), mask)
-                            gy = y + 20 + art_h + 15
-                        else: gy = y + int(box_h * 0.15)
-
-                        for line in textwrap.wrap(g_val, width=int(box_w/(game_f_size*0.5)))[:2]:
-                            draw.text((box_x + box_w//2, gy), line, fill=c_txt, font=game_f, anchor="mt"); gy += game_f_size + 8
-                        if s_val:
-                            for line in textwrap.wrap(s_val, width=int(box_w/(sub_f_size*0.4)))[:2]:
-                                draw.text((box_x + box_w//2, gy), line, fill=c_sub, font=sub_f, anchor="mt"); gy += sub_f_size + 8
-                        
-                        gy += 10
-                        draw.text((box_x + box_w//2, gy), item['code'], fill=c_txt, font=day_f_st, anchor="mt"); gy += day_f_size_st + 10
-                        times = self.get_converted_time(item['time'].get(), self.my_zone.get(), self.sec_zone.get(), self.show_primary.get())
-                        for t_str in times:
-                            draw.text((box_x + box_w//2, gy), t_str, fill=c_sub, font=time_f_st, anchor="mt"); gy += time_f_size_st + 5
-
-                    else:
-                        draw.text((box_x + 40, y + (box_h * 0.35)), item["code"], fill=c_txt, font=day_f, anchor="lm")
-                        
-                        times = self.get_converted_time(item['time'].get(), self.my_zone.get(), self.sec_zone.get(), self.show_primary.get())
-                        ty = y + (box_h * 0.65)
-                        for t_str in times:
-                            draw.text((box_x + 40, ty), t_str, fill=c_sub, font=time_f, anchor="lm"); ty += time_f_size + 5
-
-                        text_x = box_x + 240 
-                        art_x = box_x + box_w - 20
-                        
-                        if art_img:
-                            art_h = box_h - 40; art_w = int(art_h * 0.75)
-                            art_x = box_x + box_w - 20 - art_w
-                            art = ImageOps.fit(art_img.convert("RGBA"), (art_w, art_h))
-                            mask = Image.new("L", (art_w, art_h), 0)
-                            ImageDraw.Draw(mask).rounded_rectangle([0, 0, art_w, art_h], 15, 255)
-                            img.paste(art, (art_x, y + 20), mask)
-                        
-                        max_text_w = art_x - text_x - 30
-                        g_lines = textwrap.wrap(g_val, width=max(10, int(max_text_w / (game_f_size * 0.55))))
-                        s_lines = textwrap.wrap(s_val, width=max(12, int(max_text_w / (sub_f_size * 0.50)))) if s_val else []
-                        
-                        total_h = len(g_lines) * (game_f_size + 8) + (len(s_lines) * (sub_f_size + 8) + 10 if s_lines else 0)
-                        gy = y + (box_h // 2) - (total_h // 2) 
-                        
-                        for line in g_lines:
-                            draw.text((text_x, gy), line, fill=c_txt, font=game_f); gy += game_f_size + 8
-                        if s_lines:
-                            gy += 10 
-                            for line in s_lines:
-                                draw.text((text_x, gy), line, fill=c_sub, font=sub_f); gy += sub_f_size + 8
-
+            img = self.render_schedule_image(self.canvas_format.get())
+            cw, ch = img.size
             max_preview_w = getattr(self, 'prev_width', 950) - 20
             max_preview_h = getattr(self, 'prev_height', 850) - 20
             if max_preview_w < 100: max_preview_w = 950
@@ -560,7 +599,32 @@ del "%~f0"
             img.convert("RGB").save("schedule_final.jpg", quality=95)
         except Exception as e: self.log(f"Renderer Note: {e}")
 
-    # --- DEPLOY ENGINE ---
+    # --- SEPARATED EXPORT ENGINE ---
+    def start_export(self):
+        threading.Thread(target=self.run_export, daemon=True).start()
+
+    def run_export(self):
+        self.log("💾 Exporting selected formats to Desktop...")
+        export_dir = os.path.join(os.path.expanduser('~'), 'Desktop', 'Simph_Schedules')
+        os.makedirs(export_dir, exist_ok=True)
+        saved_count = 0
+        
+        for r_name, var in self.export_vars.items():
+            if var.get():
+                try:
+                    e_img = self.render_schedule_image(r_name)
+                    safe_name = r_name.split(' ')[0].replace(':', 'x')
+                    e_path = os.path.join(export_dir, f"Schedule_{self.selected_start_date.strftime('%b%d')}_{safe_name}.jpg")
+                    e_img.convert("RGB").save(e_path, quality=95)
+                    saved_count += 1
+                except Exception as e: self.log(f"❌ Failed to export {r_name}: {e}")
+        
+        if saved_count > 0:
+            self.log(f"✅ Successfully exported {saved_count} image(s) to Desktop/Simph_Schedules!")
+        else:
+            self.log("⚠️ No formats ticked for export!")
+
+    # --- SEPARATED DEPLOY ENGINE ---
     def start_deploy(self): threading.Thread(target=lambda: asyncio.run(self.run_engine()), daemon=True).start()
     async def run_engine(self):
         self.log("🚀 Starting Global Deployment...")
@@ -675,10 +739,10 @@ del "%~f0"
         self.header_sub_entry = ctk.CTkEntry(side); self.header_sub_entry.pack(fill="x", padx=10, pady=5); self.header_sub_entry.bind("<KeyRelease>", self.schedule_preview)
         
         # --- SECTION: CANVAS & BACKGROUND ---
-        self.add_section_header(side, "--- CANVAS & BACKGROUND ---")
+        self.add_section_header(side, "--- PREVIEW CANVAS ---")
         self.canvas_format = ctk.CTkOptionMenu(side, values=list(self.ratios.keys()), command=self.schedule_preview)
         self.canvas_format.pack(fill="x", padx=10, pady=5)
-        self.canvas_format.set(self.cfg.get("canvas_format", "9:16 (TikTok / Reels / Phone)"))
+        self.canvas_format.set(self.cfg.get("canvas_format", "9:16 (TikTok/Reels/Shorts)"))
         
         btn_f1 = ctk.CTkFrame(side, fg_color="transparent"); btn_f1.pack(fill="x", padx=10, pady=2)
         ctk.CTkButton(btn_f1, text="📁 Set Background", command=self.pick_bg).pack(side="left", expand=True, padx=2)
@@ -687,6 +751,41 @@ del "%~f0"
         self.bg_zoom_slider = self.add_slider(side, "Background Zoom", "bg_zoom", 25, 300, is_pct=True)
         self.logo_size_slider = self.add_slider(side, "Top Logo Size", "logo_size", 100, 500, is_px=True)
         
+        # --- SECTION: SPONSOR & GOALS ---
+        self.add_section_header(side, "--- SPONSOR & GOALS ---")
+        btn_spon = ctk.CTkFrame(side, fg_color="transparent"); btn_spon.pack(fill="x", padx=10, pady=2)
+        
+        self.btn_sponsor_logo = ctk.CTkButton(btn_spon, text="❌ Remove Logo" if self.cfg.get("sponsor_path") else "📁 Set Sponsor/Goal Logo", fg_color="green" if self.cfg.get("sponsor_path") else ["#3a7ebf", "#1f538d"], command=self.pick_sponsor)
+        self.btn_sponsor_logo.pack(fill="x", expand=True)
+
+        self.sponsor_title = ctk.CTkEntry(side, placeholder_text="Goal Title (e.g. Sub Goal)")
+        self.sponsor_title.pack(fill="x", padx=10, pady=(5, 2))
+        self.sponsor_title.bind("<KeyRelease>", self.schedule_preview)
+        self.sponsor_title.insert(0, self.cfg.get("sponsor_title", ""))
+
+        goal_f = ctk.CTkFrame(side, fg_color="transparent"); goal_f.pack(fill="x", padx=10, pady=2)
+        self.goal_current = ctk.CTkEntry(goal_f, width=80, placeholder_text="Current (0)")
+        self.goal_current.pack(side="left", expand=True, padx=(0, 2))
+        self.goal_current.bind("<KeyRelease>", self.schedule_preview)
+        self.goal_current.insert(0, self.cfg.get("goal_current", ""))
+        
+        ctk.CTkLabel(goal_f, text="/").pack(side="left")
+        
+        self.goal_target = ctk.CTkEntry(goal_f, width=80, placeholder_text="Target (100)")
+        self.goal_target.pack(side="right", expand=True, padx=(2, 0))
+        self.goal_target.bind("<KeyRelease>", self.schedule_preview)
+        self.goal_target.insert(0, self.cfg.get("goal_target", ""))
+
+        # --- SECTION: EXPORT SIZES ---
+        self.add_section_header(side, "--- EXPORT OPTIONS ---")
+        ctk.CTkLabel(side, text="Select formats to save to Desktop:", text_color="#AAAAAA", font=("Arial", 10)).pack(anchor="w", padx=10)
+        self.export_vars = {}
+        for r_name in self.ratios.keys():
+            var = ctk.BooleanVar(value=True if "9:16" in r_name else False)
+            chk = ctk.CTkCheckBox(side, text=r_name, variable=var, height=20, font=("Arial", 11))
+            chk.pack(anchor="w", padx=15, pady=2)
+            self.export_vars[r_name] = var
+
         # --- SECTION: TEXT & COLORS ---
         self.add_section_header(side, "--- TEXT & COLORS ---")
         self.font_menu = ctk.CTkOptionMenu(side, values=list(self.font_map.keys()), command=self.schedule_preview); self.font_menu.pack(fill="x", padx=10, pady=5); self.font_menu.set(self.cfg.get("font", "Arial Black"))
@@ -718,9 +817,12 @@ del "%~f0"
         ctk.CTkLabel(side, text="Secondary Display Timezone:").pack(pady=(5,0))
         self.sec_zone = ctk.CTkOptionMenu(side, values=list(self.sec_tz_map.keys()), command=self.schedule_preview); self.sec_zone.pack(fill="x", padx=10, pady=2); self.sec_zone.set(self.cfg.get("sec_zone", "US East (EST/EDT)"))
         
-        # --- NEW DEDICATED HELP BUTTON ---
         ctk.CTkButton(side, text="📘 HOW TO USE THIS APP", fg_color="#333333", command=self.show_help_popup).pack(fill="x", padx=10, pady=(15, 0))
-        ctk.CTkButton(side, text="🚀 DEPLOY", height=60, fg_color="#801010", font=("Arial", 20, "bold"), command=self.start_deploy).pack(side="bottom", pady=20, fill="x", padx=10)
+        
+        # --- EXPORT / DEPLOY BUTTONS ---
+        btn_action_f = ctk.CTkFrame(side, fg_color="transparent"); btn_action_f.pack(fill="x", padx=10, pady=(15, 20))
+        ctk.CTkButton(btn_action_f, text="💾 EXPORT", height=50, fg_color="#21612b", font=("Arial", 16, "bold"), command=self.start_export).pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ctk.CTkButton(btn_action_f, text="🚀 DEPLOY", height=50, fg_color="#801010", font=("Arial", 16, "bold"), command=self.start_deploy).pack(side="right", fill="x", expand=True, padx=(5, 0))
         
         # --- PLANNER RIGHT SIDE ---
         scroll = ctk.CTkScrollableFrame(p, label_text="WEEKLY SCHEDULE TICKBOXES"); scroll.pack(side="left", fill="both", expand=True, padx=10, pady=10)
@@ -767,13 +869,24 @@ del "%~f0"
                 self.days_ui_list[idx]["custom_art"] = p
                 self.days_ui_list[idx]["art_btn"].configure(fg_color="green")
         self.schedule_preview()
+        
+    def pick_sponsor(self):
+        if self.cfg.get("sponsor_path"):
+            self.cfg["sponsor_path"] = ""
+            self.btn_sponsor_logo.configure(fg_color=["#3a7ebf", "#1f538d"], text="📁 Set Sponsor/Goal Logo")
+        else:
+            p = filedialog.askopenfilename()
+            if p: 
+                self.cfg["sponsor_path"] = p
+                self.btn_sponsor_logo.configure(fg_color="green", text="❌ Remove Logo")
+        self.schedule_preview()
 
     def select_game(self, idx, val, gid):
         self.days_ui_list[idx]["game"].delete(0, 'end'); self.days_ui_list[idx]["game"].insert(0, val); self.game_ids[val] = gid
         self.hide_all_suggest(); self.focus(); threading.Thread(target=lambda: asyncio.run(self.up_art(val, self.days_ui_list[idx]["code"])), daemon=True).start()
     
     def save_settings(self):
-        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get()})
+        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get()})
         with open(self.settings_path, "w") as f: json.dump(self.cfg, f, indent=4)
         self.refresh_status(); messagebox.showinfo("Saved", "Settings Saved Securely!"); self.schedule_preview()
 
@@ -853,7 +966,7 @@ del "%~f0"
         font_name = self.font_menu.get()
         font_file = self.font_map.get(font_name, "arialbd.ttf")
         p = os.path.join(os.environ['WINDIR'], 'Fonts', font_file)
-        return ImageFont.truetype(p if os.path.exists(p) else "arialbd.ttf", size)
+        return ImageFont.truetype(p if os.path.exists(p) else "arialbd.ttf", max(1, size))
 
 if __name__ == "__main__":
     app = SimphStudio(); app.mainloop()
