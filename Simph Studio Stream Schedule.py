@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
-import json, datetime, time, os, textwrap, re, requests, asyncio, pytz, webbrowser, shutil, calendar, math
+import json, datetime, time, os, textwrap, re, requests, asyncio, pytz, webbrowser, shutil, calendar, math, random
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from tkinter import filedialog, messagebox, colorchooser
 from twitchAPI.twitch import Twitch
@@ -12,10 +12,11 @@ class SimphStudio(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.3"
-        self.UPDATE_URL = "https://raw.githubusercontent.com/TheSimph/Simph-Studio/main/version.txt"
-        self.RELEASE_URL = "https://github.com/TheSimph/Simph-Studio/releases/latest"
+        # --- UPDATE SETTINGS (LOCKED TO VERSION 0.1.5) ---
+        self.APP_VERSION = "0.1.5"
+        self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
+        self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
+        self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
 
         self.title(f"Simph Stream Schedule App - Ver {self.APP_VERSION}")
         self.geometry("1650x1000")
@@ -117,13 +118,15 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
+    # --- UPDATED: AUTO-UPDATER WITH CACHE BUSTER ---
     def check_for_updates(self):
         def run_check():
             try:
-                response = requests.get(self.UPDATE_URL, timeout=3)
+                cb = f"?cb={random.randint(1, 999999)}"
+                response = requests.get(self.UPDATE_URL + cb, timeout=5)
                 if response.status_code == 200:
                     latest_v = response.text.strip()
-                    if latest_v != self.APP_VERSION and len(latest_v) < 10:
+                    if latest_v != self.APP_VERSION:
                         self.after(0, lambda: self.show_update_popup(latest_v))
             except: pass 
         threading.Thread(target=run_check, daemon=True).start()
