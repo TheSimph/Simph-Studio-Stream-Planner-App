@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.22"
+        self.APP_VERSION = "0.1.23"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -144,7 +144,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- TRUE AUTO-UPDATER LOGIC WITH PID HUNTER ---
+    # --- BULLETPROOF CASE-INSENSITIVE AUTO-UPDATER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -209,7 +209,7 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing PID Hunter Script...")
+                self.log("🚀 Preparing Bulletproof PID Hunter...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
@@ -236,10 +236,6 @@ if "%ERRORLEVEL%"=="0" (
 timeout /t 1 /nobreak > NUL
 move /Y "{new_exe_path}" "{current_exe}"
 cd /d "{exe_dir}"
-set _MEIPASS2=
-set _MEIPASS=
-set TCL_LIBRARY=
-set TK_LIBRARY=
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
 del "{zip_path}"
@@ -247,14 +243,21 @@ del "%~f0"
 """
                 with open(bat_path, "w") as f: f.write(bat_content)
                 
+                # --- CASE-INSENSITIVE ENVIRONMENT NUKE ---
                 clean_env = os.environ.copy()
-                keys_to_scrub = ['_MEIPASS2', '_MEIPASS', 'MEIPASS2', 'TCL_LIBRARY', 'TK_LIBRARY']
+                keys_to_scrub = []
+                for k in clean_env.keys():
+                    k_up = k.upper()
+                    if 'MEIPASS' in k_up or 'TCL_' in k_up or 'TK_' in k_up or '_MEI' in k_up:
+                        keys_to_scrub.append(k)
+                    elif k_up == 'PATH':
+                        if hasattr(sys, '_MEIPASS'):
+                            paths = clean_env[k].split(os.pathsep)
+                            paths = [p for p in paths if sys._MEIPASS not in p]
+                            clean_env[k] = os.pathsep.join(paths)
+                            
                 for k in keys_to_scrub:
                     clean_env.pop(k, None)
-                if 'PATH' in clean_env and hasattr(sys, '_MEIPASS'):
-                    paths = clean_env['PATH'].split(os.pathsep)
-                    paths = [p for p in paths if sys._MEIPASS not in p]
-                    clean_env['PATH'] = os.pathsep.join(paths)
                 
                 subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=0x08000000)
                 self.after(0, self.destroy)
@@ -526,18 +529,17 @@ del "%~f0"
             raw_g_size = int(self.game_size_slider.get())
             raw_s_size = int(self.sub_size_slider.get())
 
-            day_f = self.get_f_path(min(65, int(box_h * 0.30))); day_f_size = min(65, int(box_h * 0.30))
+            day_f_size = min(65, int(box_h * 0.30))
+            day_f = self.get_f_path(day_f_size)
             
-            # --- THE TIMEZONE SQUISH FIX ---
-            # 1. Set up the dedicated Left Column
+            # --- THE TIMEZONE SQUISH FIX (RE-IMPLEMENTED) ---
             max_day_w = max([day_f.getlength(item["code"]) for item in checked])
-            left_col_w = int(max(max_day_w, cw * 0.12)) # Guarantees minimum width so fonts don't crush
             
-            # 2. Dynamically squish the Time Font until it fits inside the Left Column perfectly
+            # Dynamically shrink Time font so it NEVER exceeds the Day font width
             time_f_size = min(30, int(box_h * 0.15))
             time_f = self.get_f_path(time_f_size)
             
-            while time_f_size > 10:
+            while time_f_size > 8:
                 max_t_w = 0
                 for item in checked:
                     if not item['offline'].get():
@@ -545,10 +547,13 @@ del "%~f0"
                         for t_str in times:
                             w = time_f.getlength(t_str)
                             if w > max_t_w: max_t_w = w
-                if max_t_w <= left_col_w:
-                    break
+                
+                if max_t_w <= max_day_w: 
+                    break 
                 time_f_size -= 1
                 time_f = self.get_f_path(time_f_size)
+                
+            left_col_w = max_day_w # The left column is tightly locked to the Day text width
             
             for idx, item in enumerate(checked):
                 c, r = positions[idx]
@@ -565,7 +570,6 @@ del "%~f0"
                 if is_off:
                     game_f_off = self.get_f_path(local_g_size)
                     draw.text((box_x + left_margin, y + (box_h * 0.5)), item["code"], fill=c_txt, font=day_f, anchor="lm")
-                    # Offline text now physically aligns with the game titles perfectly
                     draw.text((box_x + left_margin + left_col_w + 25, y + (box_h * 0.5)), "OFFLINE", fill=c_sub, font=game_f_off, anchor="lm")
                     continue
 
@@ -588,8 +592,6 @@ del "%~f0"
                     draw.text((box_x + left_margin, ty), t_str, fill=c_sub, font=time_f, anchor="lm")
                     ty += time_f_size + 5
 
-                # --- MASTER VERTICAL ALIGNMENT ---
-                # Game Titles now always start exactly 25px after the dedicated Left Column width
                 text_x = box_x + left_margin + left_col_w + 25 
                 art_x = box_x + box_w - 20
                 
@@ -603,6 +605,7 @@ del "%~f0"
                         img.paste(art, (art_x, y + 20), mask)
                     except: pass
                 
+                # --- VERTICAL SAFE ZONE CLAMP ---
                 max_text_w = max(20, art_x - text_x - 20)
                 game_f = self.get_f_path(local_g_size)
                 sub_f = self.get_f_path(local_s_size)
