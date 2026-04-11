@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.27"
+        self.APP_VERSION = "0.1.30"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -151,7 +151,7 @@ class SimphStudio(ctk.CTk):
             "font": "Arial Black", "box_color": "#6E1414", "bg_zoom": 100, "box_opacity": 240,
             "header_txt_color": "#FFFFFF", "sub_txt_color": "#C8C8C8", "box_txt_color": "#FFFFFF",
             "header_text": "STREAMER SCHEDULE", "header_size": 100, "sub_size": 40, "logo_size": 200,
-            "game_size": 45, "subtitle_size": 30, "export_path": "",
+            "game_size": 45, "subtitle_size": 30, "export_path": "", "deploy_format": "9:16 (TikTok/Reels/Shorts)",
             "my_zone": "UK (GMT/BST)", "sec_zone": "US East (EST/EDT)", "start_day": "MON",
             "canvas_format": "9:16 (TikTok/Reels/Shorts)", "max_box_h": 250, "time_fmt": "24-Hour (20:00)", "show_primary": True,
             "sponsor_title": "", "goal_current": "", "goal_target": "", "sponsor_path": ""
@@ -161,7 +161,6 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- PURE PYTHON SEAMLESS REINSTALLER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -221,7 +220,7 @@ class SimphStudio(ctk.CTk):
 
             self.log("📦 Extracting new files...")
             extract_dir = os.path.join(self.appdata_dir, "update_extracted")
-            if os.path.exists(extract_dir): shutil.rmtree(extract_dir)
+            if os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
 
@@ -397,9 +396,7 @@ class SimphStudio(ctk.CTk):
             return res
         except: return [time_str]
 
-    # --- THE "STUCK" RESIZE FIX ---
     def on_preview_resize(self, event):
-        # We explicitly verify the event is coming from the container, NOT the image label inside it
         if event.widget == self.prev_container:
             if self._resize_timer:
                 self.after_cancel(self._resize_timer)
@@ -585,8 +582,10 @@ class SimphStudio(ctk.CTk):
                 s_val = item["sub"].get().strip()
                 
                 art_img = None
+                is_custom = False
                 if item.get("custom_art") and os.path.exists(item["custom_art"]):
                     art_img = Image.open(item["custom_art"])
+                    is_custom = True
                 elif item["code"] in self.art_cache and raw_g:
                     art_img = Image.open(self.art_cache[item["code"]])
 
@@ -602,17 +601,48 @@ class SimphStudio(ctk.CTk):
                 text_x = box_x + left_margin + left_col_w + 25 
                 art_x = box_x + box_w - 20
                 
-                if art_img and box_h > 50:
-                    art_h = box_h - 40; art_w = int(art_h * 0.75)
-                    art_x = box_x + box_w - 20 - art_w
+                if art_img and box_h > 30:
+                    art_h = int(box_h * 0.85) 
+                    
+                    if is_custom:
+                        orig_w, orig_h = art_img.size
+                        ratio = orig_w / float(orig_h)
+                        art_w = int(art_h * ratio)
+                        max_w = int(box_w * 0.4) 
+                        if art_w > max_w:
+                            art_w = max_w
+                            art_h = int(art_w / ratio)
+                    else:
+                        art_w = int(art_h * 0.75) 
+                        
+                    art_y = y + (box_h - art_h) // 2
+                    art_x = box_x + box_w - int(box_h * 0.075) - art_w
+                    
                     try:
-                        art = ImageOps.fit(art_img.convert("RGBA"), (art_w, art_h))
+                        art = ImageOps.fit(art_img.convert("RGBA"), (art_w, art_h), method=Image.Resampling.LANCZOS)
                         mask = Image.new("L", (art_w, art_h), 0)
-                        ImageDraw.Draw(mask).rounded_rectangle([0, 0, art_w, art_h], 15, 255)
-                        img.paste(art, (art_x, y + 20), mask)
+                        ImageDraw.Draw(mask).rounded_rectangle([0, 0, art_w, art_h], int(art_h * 0.1), 255)
+                        img.paste(art, (art_x, art_y), mask)
                     except: pass
                 
                 max_text_w = max(20, art_x - text_x - 20)
+                
+                game_words = g_val.split()
+                if game_words:
+                    while local_g_size > 10:
+                        test_f = self.get_f_path(local_g_size)
+                        if max([test_f.getlength(w) for w in game_words]) <= max_text_w:
+                            break
+                        local_g_size -= 2
+                        
+                sub_words = s_val.split()
+                if sub_words:
+                    while local_s_size > 10:
+                        test_f = self.get_f_path(local_s_size)
+                        if max([test_f.getlength(w) for w in sub_words]) <= max_text_w:
+                            break
+                        local_s_size -= 2
+
                 game_f = self.get_f_path(local_g_size)
                 sub_f = self.get_f_path(local_s_size)
                 
@@ -729,16 +759,22 @@ class SimphStudio(ctk.CTk):
         else:
             self.log("⚠️ No formats ticked for export!")
             
-        # Force a UI refresh after export finishes to prevent resizing lockups
         self.after(100, self.schedule_preview)
 
     def start_deploy(self): threading.Thread(target=lambda: asyncio.run(self.run_engine()), daemon=True).start()
     async def run_engine(self):
         self.log("🚀 Starting Global Deployment...")
-        self.generate_preview_image()
+        
+        deploy_target = self.deploy_format.get()
+        try:
+            deploy_img = self.render_schedule_image(deploy_target)
+            deploy_img.convert("RGB").save("schedule_deploy.jpg", quality=95)
+        except Exception as e:
+            self.log(f"❌ Failed to render deployment image: {e}")
+            return
+            
         time.sleep(1.5)
 
-        # --- THE WEBHOOK SCRUBBER & DELETION FIX ---
         webhook_url = self.cfg.get('webhook', '').strip()
         base_webhook = webhook_url.split('?')[0].rstrip('/') 
         
@@ -782,7 +818,7 @@ class SimphStudio(ctk.CTk):
 
         if base_webhook:
             try:
-                with open("schedule_final.jpg", "rb") as f:
+                with open("schedule_deploy.jpg", "rb") as f:
                     r = requests.post(f"{base_webhook}?wait=true", data={"content": discord_msg}, files={"file": f}, timeout=15)
                     if r.status_code in [200, 204]:
                         try:
@@ -901,7 +937,7 @@ class SimphStudio(ctk.CTk):
         self.goal_target.insert(0, self.cfg.get("goal_target", ""))
 
         # --- SECTION: EXPORT OPTIONS & CUSTOM FOLDER ---
-        self.add_section_header(side, "--- EXPORT OPTIONS ---")
+        self.add_section_header(side, "--- EXPORT & DEPLOY OPTIONS ---")
         
         path_f = ctk.CTkFrame(side, fg_color="transparent")
         path_f.pack(fill="x", padx=10, pady=(0, 5))
@@ -916,16 +952,24 @@ class SimphStudio(ctk.CTk):
             if d:
                 self.export_path_var.set(d)
                 self.cfg["export_path"] = d
+                self.save_settings()
                 
         ctk.CTkButton(path_f, text="📁", width=30, command=choose_export_dir).pack(side="right")
 
-        ctk.CTkLabel(side, text="Select formats to save:", text_color="#AAAAAA", font=("Arial", 10)).pack(anchor="w", padx=10)
+        ctk.CTkLabel(side, text="Select formats to mass-export:", text_color="#AAAAAA", font=("Arial", 10)).pack(anchor="w", padx=10)
         self.export_vars = {}
         for r_name in self.ratios.keys():
             var = ctk.BooleanVar(value=True if "9:16" in r_name else False)
             chk = ctk.CTkCheckBox(side, text=r_name, variable=var, height=20, font=("Arial", 11))
             chk.pack(anchor="w", padx=15, pady=2)
             self.export_vars[r_name] = var
+
+        ctk.CTkLabel(side, text="Discord Deploy Format:", text_color="#AAAAAA", font=("Arial", 10)).pack(anchor="w", padx=10, pady=(10, 0))
+        self.deploy_format = ctk.CTkOptionMenu(side, values=list(self.ratios.keys()))
+        self.deploy_format.pack(fill="x", padx=10, pady=5)
+        saved_deploy = self.cfg.get("deploy_format", "9:16 (TikTok/Reels/Shorts)")
+        if saved_deploy not in self.ratios: saved_deploy = "9:16 (TikTok/Reels/Shorts)"
+        self.deploy_format.set(saved_deploy)
 
         # --- SECTION: TEXT & COLORS ---
         self.add_section_header(side, "--- TEXT & COLORS ---")
@@ -1030,7 +1074,7 @@ class SimphStudio(ctk.CTk):
         self.hide_all_suggest(); self.focus(); threading.Thread(target=lambda: asyncio.run(self.up_art(val, self.days_ui_list[idx]["code"])), daemon=True).start()
     
     def save_settings(self):
-        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get(), "game_size":self.game_size_slider.get(), "subtitle_size":self.sub_size_slider.get(), "export_path": getattr(self, 'export_path_var', tk.StringVar()).get()})
+        self.cfg.update({"webhook":self.set_webhook.get(),"t_id":self.set_id.get(),"t_sec":self.set_sec.get(),"t_tok":self.set_tok.get(),"header_text":self.header_entry.get(),"header_size":self.header_size_slider.get(),"sub_size":self.header_sub_size_slider.get(),"logo_size":self.logo_size_slider.get(),"bg_zoom":self.bg_zoom_slider.get(),"box_opacity":self.box_opacity_slider.get(),"font":self.font_menu.get(),"my_zone":self.my_zone.get(),"sec_zone":self.sec_zone.get(), "canvas_format":self.canvas_format.get(), "max_box_h":self.max_box_slider.get(), "time_fmt":self.time_fmt.get(), "show_primary":self.show_primary.get(), "sponsor_title":self.sponsor_title.get(), "goal_current":self.goal_current.get(), "goal_target":self.goal_target.get(), "game_size":self.game_size_slider.get(), "subtitle_size":self.sub_size_slider.get(), "export_path": getattr(self, 'export_path_var', tk.StringVar()).get(), "deploy_format": getattr(self, 'deploy_format', ctk.CTkOptionMenu(self)).get()})
         with open(self.settings_path, "w") as f: json.dump(self.cfg, f, indent=4)
         self.refresh_status(); messagebox.showinfo("Saved", "Settings Saved Securely!"); self.schedule_preview()
 
@@ -1109,8 +1153,12 @@ class SimphStudio(ctk.CTk):
     def get_f_path(self, size):
         font_name = self.font_menu.get()
         font_file = self.font_map.get(font_name, "arialbd.ttf")
-        p = os.path.join(os.environ['WINDIR'], 'Fonts', font_file)
-        return ImageFont.truetype(p if os.path.exists(p) else "arialbd.ttf", max(1, size))
+        windir = os.environ.get('WINDIR', 'C:\\Windows')
+        p = os.path.join(windir, 'Fonts', font_file)
+        if not os.path.exists(p):
+            p = os.path.join(windir, 'Fonts', 'arial.ttf')
+        return ImageFont.truetype(p if os.path.exists(p) else "arial.ttf", max(1, size))
 
 if __name__ == "__main__":
-    app = SimphStudio(); app.mainloop()
+    app = SimphStudio()
+    app.mainloop()
