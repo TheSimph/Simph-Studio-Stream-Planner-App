@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.15"
+        self.APP_VERSION = "0.1.16"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -210,7 +210,7 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Fortified Ghost Script...")
+                self.log("🚀 Preparing Nuke-and-Pave Ghost Script...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
@@ -224,12 +224,19 @@ class SimphStudio(ctk.CTk):
                 
                 bat_path = os.path.join(self.appdata_dir, "update.bat")
                 
+                # --- THE ENVIRONMENT NUKE ---
+                # We aggressively strip the PATH down to pure Windows system 32 defaults
                 bat_content = f"""@echo off
 echo Installing new Simph Studio Update...
 echo Please wait for the old application to close completely.
 timeout /t 5 /nobreak > NUL
 move /Y "{new_exe_path}" "{current_exe}"
 cd /d "{exe_dir}"
+set _MEIPASS2=
+set _MEIPASS=
+set TCL_LIBRARY=
+set TK_LIBRARY=
+set PATH=%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
 del "{zip_path}"
@@ -237,19 +244,7 @@ del "%~f0"
 """
                 with open(bat_path, "w") as f: f.write(bat_content)
                 
-                # --- TOXIC ENVIRONMENT SCRUBBER ---
-                clean_env = os.environ.copy()
-                clean_env.pop('_MEIPASS2', None)
-                clean_env.pop('_MEIPASS', None)
-                clean_env.pop('TCL_LIBRARY', None)
-                clean_env.pop('TK_LIBRARY', None)
-                
-                # Rip the old _MEI path completely out of the PATH variable
-                if 'PATH' in clean_env and hasattr(sys, '_MEIPASS'):
-                    clean_env['PATH'] = clean_env['PATH'].replace(sys._MEIPASS + os.pathsep, '').replace(sys._MEIPASS, '')
-                
-                # Launch the script completely detached from the old environment
-                subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.Popen(['cmd.exe', '/c', bat_path], creationflags=subprocess.CREATE_NO_WINDOW)
                 self.after(0, self.destroy)
             else:
                 self.log("⚠️ Cannot auto-install while running as a .py script. Update downloaded to AppData.")
@@ -760,7 +755,10 @@ del "%~f0"
         self.add_section_header(side, "--- PREVIEW CANVAS ---")
         self.canvas_format = ctk.CTkOptionMenu(side, values=list(self.ratios.keys()), command=self.schedule_preview)
         self.canvas_format.pack(fill="x", padx=10, pady=5)
-        self.canvas_format.set(self.cfg.get("canvas_format", "9:16 (TikTok/Reels/Shorts)"))
+        
+        saved_format = self.cfg.get("canvas_format", "9:16 (TikTok/Reels/Shorts)")
+        if saved_format not in self.ratios: saved_format = "9:16 (TikTok/Reels/Shorts)"
+        self.canvas_format.set(saved_format)
         
         btn_f1 = ctk.CTkFrame(side, fg_color="transparent"); btn_f1.pack(fill="x", padx=10, pady=2)
         ctk.CTkButton(btn_f1, text="📁 Set Background", command=self.pick_bg).pack(side="left", expand=True, padx=2)
