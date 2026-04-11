@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.14"
+        self.APP_VERSION = "0.1.15"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -145,7 +145,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- TRUE AUTO-UPDATER LOGIC WITH PYINSTALLER GHOST FIX ---
+    # --- TRUE AUTO-UPDATER LOGIC WITH TOXIC ENVIRONMENT SCRUBBER ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -210,7 +210,7 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Ghost Script...")
+                self.log("🚀 Preparing Fortified Ghost Script...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
@@ -224,17 +224,12 @@ class SimphStudio(ctk.CTk):
                 
                 bat_path = os.path.join(self.appdata_dir, "update.bat")
                 
-                # --- MEMORY WIPE FIX ---
-                # We clear _MEIPASS2 and TCL/TK vars so the newly launched .exe doesn't try to read the dead app's temporary files.
                 bat_content = f"""@echo off
 echo Installing new Simph Studio Update...
 echo Please wait for the old application to close completely.
 timeout /t 5 /nobreak > NUL
 move /Y "{new_exe_path}" "{current_exe}"
 cd /d "{exe_dir}"
-set _MEIPASS2=
-set TCL_LIBRARY=
-set TK_LIBRARY=
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
 del "{zip_path}"
@@ -242,7 +237,19 @@ del "%~f0"
 """
                 with open(bat_path, "w") as f: f.write(bat_content)
                 
-                os.startfile(bat_path)
+                # --- TOXIC ENVIRONMENT SCRUBBER ---
+                clean_env = os.environ.copy()
+                clean_env.pop('_MEIPASS2', None)
+                clean_env.pop('_MEIPASS', None)
+                clean_env.pop('TCL_LIBRARY', None)
+                clean_env.pop('TK_LIBRARY', None)
+                
+                # Rip the old _MEI path completely out of the PATH variable
+                if 'PATH' in clean_env and hasattr(sys, '_MEIPASS'):
+                    clean_env['PATH'] = clean_env['PATH'].replace(sys._MEIPASS + os.pathsep, '').replace(sys._MEIPASS, '')
+                
+                # Launch the script completely detached from the old environment
+                subprocess.Popen(['cmd.exe', '/c', bat_path], env=clean_env, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.after(0, self.destroy)
             else:
                 self.log("⚠️ Cannot auto-install while running as a .py script. Update downloaded to AppData.")
