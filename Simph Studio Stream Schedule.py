@@ -16,7 +16,7 @@ class SimphStudio(ctk.CTk):
         super().__init__()
         
         # --- UPDATE SETTINGS ---
-        self.APP_VERSION = "0.1.13"
+        self.APP_VERSION = "0.1.14"
         self.REPO_NAME = "Simph-Studio-Stream-Planner-App"
         self.UPDATE_URL = f"https://raw.githubusercontent.com/TheSimph/{self.REPO_NAME}/main/version.txt"
         self.RELEASE_URL = f"https://github.com/TheSimph/{self.REPO_NAME}/releases/latest"
@@ -28,7 +28,6 @@ class SimphStudio(ctk.CTk):
         
         # --- TASKBAR & WINDOW ICON FIX ---
         try:
-            # Tells Windows this is a unique app, preventing generic taskbar icon grouping
             import ctypes
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"simph.studio.app.{self.APP_VERSION}")
         except: pass
@@ -38,7 +37,6 @@ class SimphStudio(ctk.CTk):
             try: self.iconbitmap(icon_path)
             except: pass
         elif getattr(sys, 'frozen', False):
-            # Backup: If compiled, try to read the icon directly from the .exe metadata
             try: self.iconbitmap(sys.executable)
             except: pass
         
@@ -115,14 +113,9 @@ class SimphStudio(ctk.CTk):
         self.after(1200, self.refresh_status)
         self.after(2000, self.check_for_updates)
 
-    # --- UTILITY: GET RESOURCE PATH ---
     def get_resource_path(self, relative_path):
-        """ Get absolute path to resource, works for dev and for PyInstaller """
-        try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
-        except Exception:
-            base_path = os.path.abspath(".")
+        try: base_path = sys._MEIPASS
+        except Exception: base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
     def log(self, text):
@@ -152,7 +145,7 @@ class SimphStudio(ctk.CTk):
         if self._preview_timer: self.after_cancel(self._preview_timer)
         self._preview_timer = self.after(200, self.generate_preview_image)
 
-    # --- TRUE AUTO-UPDATER LOGIC ---
+    # --- TRUE AUTO-UPDATER LOGIC WITH PYINSTALLER GHOST FIX ---
     def check_for_updates(self):
         self.log("🔍 Checking GitHub for updates...")
         def run_check():
@@ -217,7 +210,7 @@ class SimphStudio(ctk.CTk):
                 zip_ref.extractall(extract_dir)
 
             if getattr(sys, 'frozen', False):
-                self.log("🚀 Preparing Fortified Ghost Script...")
+                self.log("🚀 Preparing Ghost Script...")
                 current_exe = sys.executable
                 exe_name = os.path.basename(current_exe)
                 exe_dir = os.path.dirname(current_exe)
@@ -231,12 +224,17 @@ class SimphStudio(ctk.CTk):
                 
                 bat_path = os.path.join(self.appdata_dir, "update.bat")
                 
+                # --- MEMORY WIPE FIX ---
+                # We clear _MEIPASS2 and TCL/TK vars so the newly launched .exe doesn't try to read the dead app's temporary files.
                 bat_content = f"""@echo off
 echo Installing new Simph Studio Update...
 echo Please wait for the old application to close completely.
 timeout /t 5 /nobreak > NUL
 move /Y "{new_exe_path}" "{current_exe}"
 cd /d "{exe_dir}"
+set _MEIPASS2=
+set TCL_LIBRARY=
+set TK_LIBRARY=
 start "" "{current_exe}"
 rmdir /S /Q "{extract_dir}"
 del "{zip_path}"
